@@ -1,0 +1,103 @@
+Metadata-Version: 2.4
+Name: paper-rag
+Version: 0.1.0
+Summary: Production-grade local RAG for academic PDFs
+Author: PaperRAG Team
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: docling
+Requires-Dist: sentence-transformers
+Requires-Dist: faiss-cpu
+Requires-Dist: torch
+Requires-Dist: numpy
+Requires-Dist: pydantic<3.0,>=2.5
+Requires-Dist: typer>=0.9
+Requires-Dist: rich>=13.0
+Requires-Dist: tqdm>=4.66
+Requires-Dist: python-dotenv<2.0,>=1.0
+Provides-Extra: llm
+Requires-Dist: transformers>=4.38; extra == "llm"
+Requires-Dist: accelerate>=0.27; extra == "llm"
+Requires-Dist: openai<2.0,>=1.0; extra == "llm"
+Provides-Extra: test
+Requires-Dist: pytest>=8.0; extra == "test"
+
+# PaperRAG
+
+Research-oriented (hopefully someday will be production-grade), local-first Retrieval-Augmented Generation (RAG)
+system for querying academic PDF collections.
+
+Default PDF directory: `/home/$USER/Documents/Mendeley Desktop/`
+
+------------------------------------------------------------------------
+
+## Features
+
+-   DOCLING-based structured PDF parsing
+-   Section-aware chunking
+-   Deterministic indexing with SHA256 hashing
+-   FAISS vector store
+-   Local or API-based LLM support
+-   Fully offline-capable
+-   Reproducible experiments
+-   CLI interface (Typer)
+
+------------------------------------------------------------------------
+
+## Installation
+
+### 1. Install Python 3.11
+
+### 2. Create environment
+
+    uv venv --python 3.11
+    source .venv/bin/activate
+
+### 3. Install dependencies
+
+    uv pip install -e .
+
+------------------------------------------------------------------------
+
+## Usage
+
+### Index PDFs
+
+    paper_rag index
+
+Custom directory:
+
+    paper_rag index --input-dir /path/to/pdfs
+
+------------------------------------------------------------------------
+
+### Query
+
+    paper_rag query "What dataset is used for cross-database evaluation?"
+
+Options:
+
+    --top-k 10
+    --no-llm
+
+------------------------------------------------------------------------
+
+## Project Structure
+
+paper_rag/ ├── parser.py ├── chunker.py ├── embedder.py ├──
+vectorstore.py ├── retriever.py ├── llm.py └── cli.py
+
+------------------------------------------------------------------------
+
+## Reproducibility
+
+-   Embedding model version stored in index
+-   File hash tracking
+-   Deterministic chunk ordering
+-   Temperature = 0.0 by default
+
+------------------------------------------------------------------------
+
+## License
+
+MIT

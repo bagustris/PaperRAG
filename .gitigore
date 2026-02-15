@@ -1,0 +1,54 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project-specific
+index/
+*.faiss
+*.index
+*.pkl
+*.joblib
+
+# Data & PDFs
+/Documents/Mendeley Desktop/
+*.pdf
+
+# Environment variables
+.env
+.env.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.log
+
+# Others 
+.venv/
+opencode.json
+prompt.md
+bak/
