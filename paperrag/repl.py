@@ -19,9 +19,10 @@ HELP_TEXT = """\
 [bold]Available commands:[/bold]
   [cyan]<any text>[/cyan]       Query the indexed papers (uses top-k retrieval + LLM)
   [cyan]index[/cyan]            Re-index the PDF directory
-  [cyan]topk <n>[/cyan]         Set top-k for retrieval (default: 5)
+  [cyan]topk <n>[/cyan]         Set top-k for retrieval (default: 3)
   [cyan]threshold <n>[/cyan]    Set similarity threshold 0.0-1.0 (default: 0.15)
   [cyan]temperature <n>[/cyan]  Set LLM temperature 0.0-2.0 (default: 0.0)
+  [cyan]max-tokens <n>[/cyan]   Set LLM max output tokens (default: 256)
   [cyan]model <name>[/cyan]     Set LLM model name
   [cyan]config[/cyan]           Show current configuration
   [cyan]help[/cyan]             Show this help message
@@ -79,14 +80,25 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         sys.exit(1)
 
     console.print(f"LLM: [cyan]{cfg.llm.model_name}[/cyan]")
-    
-    # Display threshold filtering info
+
+    # Display key accuracy parameters
+    console.print(f"Top-k: [cyan]{cfg.retriever.top_k}[/cyan] (retrieve {cfg.retriever.top_k} chunks)")
     console.print(f"Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan] (minimum similarity score)")
-    
+    console.print(f"Temperature: [cyan]{cfg.llm.temperature}[/cyan] (0.0=deterministic, higher=creative)")
+    console.print(f"Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan] (max output length)")
+
     console.print("Type [cyan]help[/cyan] for commands.\n")
 
     top_k = cfg.retriever.top_k
-    retriever = None  # lazy-loaded on first query
+
+    # Eagerly load the retriever (including embedding model) at startup
+    # so the first query doesn't pay the ~6s model-loading penalty.
+    console.print("[dim]Loading embedding model...\n[/dim]", end="")
+    retriever = _ensure_retriever(None, cfg)
+    if retriever is not None:
+        console.print(" [green]ready[/green]")
+    else:
+        console.print(" [red]failed[/red]")
 
     # Create prompt session with history support for arrow keys
     session = PromptSession(history=InMemoryHistory())
@@ -153,6 +165,15 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
                     console.print("[yellow]Usage: temperature <number>[/yellow]")
             else:
                 console.print("[yellow]Usage: temperature <number>[/yellow]")
+            continue
+
+        if command.startswith("max-tokens"):
+            parts = command.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                cfg.llm.max_tokens = int(parts[1])
+                console.print(f"Max tokens set to [cyan]{cfg.llm.max_tokens}[/cyan]")
+            else:
+                console.print("[yellow]Usage: max-tokens <number>[/yellow]")
             continue
 
         if command.startswith("model"):
@@ -288,13 +309,15 @@ def _handle_index(cfg: PaperRAGConfig) -> None:
     from paperrag.parallel import parallel_process_pdfs
     from paperrag.vectorstore import VectorStore
 
-    # pdf_dir = Path(cfg.input_dir)
+    pdf_dir = Path(cfg.input_dir)
     idx_dir = Path(cfg.index_dir)
 
-    # pdfs = discover_pdfs(pdf_dir)
-    # if not pdfs:
-    #     console.print("[red]No PDFs found.[/red]")
-    #     return
+    pdfs = discover_pdfs(pdf_dir)
+    if not pdfs:
+        console.print("[red]No PDFs found.[/red]")
+        return
+
+    is_single_file = pdf_dir.is_file()
 
     embedder = Embedder(cfg.embedder)
 
@@ -305,14 +328,16 @@ def _handle_index(cfg: PaperRAGConfig) -> None:
     else:
         store = VectorStore(idx_dir, embedder.dimension)
 
-    # Remove deleted files from the index
-    current_paths = {str(p) for p in pdfs}
-    stale = [fp for fp in list(store.file_hashes) if fp not in current_paths]
-    for fp in stale:
-        store.remove_by_file(fp)
-        del store.file_hashes[fp]
-    if stale:
-        console.print(f"Removed [red]{len(stale)}[/red] deleted file(s) from index.")
+    # Remove deleted files from the index (skip for single-file mode)
+    stale = []
+    if not is_single_file:
+        current_paths = {str(p) for p in pdfs}
+        stale = [fp for fp in list(store.file_hashes) if fp not in current_paths]
+        for fp in stale:
+            store.remove_by_file(fp)
+            del store.file_hashes[fp]
+        if stale:
+            console.print(f"Removed [red]{len(stale)}[/red] deleted file(s) from index.")
 
     # Determine which files need (re)indexing - use parallel hashing
     n_workers = cfg.indexing.get_n_workers()

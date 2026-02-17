@@ -383,10 +383,17 @@ def parse_pdf(path: Path, config: ParserConfig | None = None, manifest: dict[str
 
 
 def discover_pdfs(input_dir: Path) -> list[Path]:
-    """Recursively find all PDF files under *input_dir*."""
+    """Recursively find all PDF files under *input_dir*, or return a single PDF file."""
     if not input_dir.exists():
-        logger.error("Input directory does not exist: %s", input_dir)
+        logger.error("Input path does not exist: %s", input_dir)
         return []
+    if input_dir.is_file():
+        if input_dir.suffix.lower() == ".pdf":
+            logger.info("Single PDF file: %s", input_dir)
+            return [input_dir]
+        else:
+            logger.error("Not a PDF file: %s", input_dir)
+            return []
     pdfs = sorted(input_dir.rglob("*.pdf"))
     logger.info("Discovered %d PDF(s) in %s", len(pdfs), input_dir)
     return pdfs

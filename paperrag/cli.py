@@ -78,12 +78,14 @@ def version_callback(value: bool) -> None:
 @app.callback(invoke_without_command=True)
 def entrypoint(
     ctx: typer.Context,
-    version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True, help="Show version and license"),
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory to index"),
+    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True, help="Show version and license"),
+    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file to index"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (will auto-discover .paperrag-index subdirectory if needed)"),
+    topk: int = typer.Option(None, "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0, default: 0.15)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
+    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 512)"),
 ) -> None:
     """PaperRAG - local RAG for academic PDFs."""
     if ctx.invoked_subcommand is None:
@@ -132,7 +134,10 @@ def entrypoint(
         # Apply input_dir CLI override if specified
         if input_dir:
             cfg.input_dir = input_dir
-        
+
+        if topk is not None:
+            cfg.retriever.top_k = topk
+
         if model:
             cfg.llm.model_name = model
 
@@ -142,13 +147,16 @@ def entrypoint(
         if temperature is not None:
             cfg.llm.temperature = temperature
 
+        if max_tokens is not None:
+            cfg.llm.max_tokens = max_tokens
+
         start_repl(cfg)
 
 
 # -- index -----------------------------------------------------------------
 @app.command()
 def index(
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory"),
+    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: <input-dir>/.paperrag-index)"),
     force: bool = typer.Option(False, "--force", "-f", help="Force full re-index"),
     checkpoint_interval: int = typer.Option(
@@ -213,7 +221,11 @@ def index(
         console.print("[red]No PDFs found.[/red]")
         raise typer.Exit(1)
 
-    console.print(f"Found [green]{len(pdfs)}[/green] PDF(s) in {pdf_dir}")
+    is_single_file = pdf_dir.is_file()
+    if is_single_file:
+        console.print(f"Indexing single PDF: [green]{pdf_dir.name}[/green]")
+    else:
+        console.print(f"Found [green]{len(pdfs)}[/green] PDF(s) in {pdf_dir}")
 
     embedder = Embedder(cfg.embedder)
 
@@ -228,14 +240,16 @@ def index(
     else:
         store = VectorStore(idx_dir, embedder.dimension)
 
-    # Remove deleted files from the index
-    current_paths = {str(p) for p in pdfs}
-    stale = [fp for fp in list(store.file_hashes) if fp not in current_paths]
-    for fp in stale:
-        store.remove_by_file(fp)
-        del store.file_hashes[fp]
-    if stale:
-        console.print(f"Removed [red]{len(stale)}[/red] deleted file(s) from index.")
+    # Remove deleted files from the index (skip for single-file mode to avoid purging other files)
+    stale = []
+    if not is_single_file:
+        current_paths = {str(p) for p in pdfs}
+        stale = [fp for fp in list(store.file_hashes) if fp not in current_paths]
+        for fp in stale:
+            store.remove_by_file(fp)
+            del store.file_hashes[fp]
+        if stale:
+            console.print(f"Removed [red]{len(stale)}[/red] deleted file(s) from index.")
 
     # Determine which files need (re)indexing - use parallel hashing
     if workers is None:
@@ -462,7 +476,8 @@ def query(
     top_k: int = typer.Option(5, "--top-k", "-k"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory"),
+    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 512)"),
+    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (required)"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
 ) -> None:
@@ -500,6 +515,9 @@ def query(
 
     if temperature is not None:
         cfg.llm.temperature = temperature
+
+    if max_tokens is not None:
+        cfg.llm.max_tokens = max_tokens
 
     try:
         retriever = Retriever(cfg)
@@ -588,7 +606,7 @@ def query(
 def evaluate(
     benchmark_file: str = typer.Argument(..., help="JSONL benchmark file"),
     top_k: int = typer.Option(5, "--top-k", "-k"),
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory"),
+    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: <input-dir>/.paperrag-index)"),
 ) -> None:
     """Evaluate retrieval quality using a JSONL benchmark.

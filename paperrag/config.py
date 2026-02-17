@@ -48,9 +48,9 @@ class EmbedderConfig(BaseModel):
 class RetrieverConfig(BaseModel):
     """Retrieval configuration."""
 
-    top_k: int = Field(default=5, ge=1)
+    top_k: int = Field(default=1, ge=1)
     score_threshold: float = Field(
-        default=0.15,
+        default=0.1,
         ge=0.0,
         le=1.0,
         description="Minimum similarity score threshold (0.0 = no filtering)"
@@ -145,7 +145,7 @@ class LLMConfig(BaseModel):
 
     model_config = {"extra": "ignore"}  # tolerate old snapshots with api_base/api_key
 
-    model_name: str = "qwen3:1.7b"
+    model_name: str = "qwen2.5:1.5b"
     temperature: float = 0.0
     max_tokens: int = 512
 
@@ -168,7 +168,10 @@ class PaperRAGConfig(BaseModel):
         """Return index directory - custom path if set, otherwise input_dir/.paperrag-index."""
         if self._index_dir is not None:
             return self._index_dir
-        return str(Path(self.input_dir) / ".paperrag-index")
+        input_path = Path(self.input_dir)
+        if input_path.suffix.lower() == ".pdf":
+            return str(input_path.parent / ".paperrag-index")
+        return str(input_path / ".paperrag-index")
     
     @index_dir.setter
     def index_dir(self, value: str) -> None:

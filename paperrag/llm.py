@@ -22,7 +22,7 @@ SYSTEM_PROMPT = (
 
 # Maximum characters per context chunk sent to the LLM.
 # Longer chunks are truncated to keep prompt size manageable for small models.
-_MAX_CHUNK_CHARS = 1500
+_MAX_CHUNK_CHARS = 750
 
 
 def _build_prompt(question: str, context_chunks: list[str]) -> str:
@@ -36,10 +36,7 @@ def _build_prompt(question: str, context_chunks: list[str]) -> str:
     return (
         f"Context:\n{context_block}\n\n"
         f"Question: {question}\n\n"
-        f"Instructions: Answer using ONLY the provided context above. "
-        f"Use numbered citations [1], [2], etc. to reference specific context sources. "
-        f"Do NOT use author-year citations like (Smith et al., 2020). "
-        f"Only use the numbered format [1], [2], [3], etc.\n\n"
+        f"Answer concisely using ONLY the context. Cite sources as [1], [2], etc.\n\n"
         f"Answer:"
     )
 
@@ -151,6 +148,7 @@ def generate_answer(
         messages=messages,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
+        extra_body={"num_ctx": 2048, "keep_alive": "30m"},
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -187,6 +185,7 @@ def stream_answer(
         temperature=config.temperature,
         max_tokens=config.max_tokens,
         stream=True,
+        extra_body={"num_ctx": 2048, "keep_alive": "30m"},
     )
     for chunk in response:
         delta = chunk.choices[0].delta.content

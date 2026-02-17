@@ -50,3 +50,17 @@ def test_discover_pdfs_finds_files(tmp_path):
 def test_discover_pdfs_nonexistent(tmp_path):
     pdfs = discover_pdfs(tmp_path / "does_not_exist")
     assert pdfs == []
+
+
+def test_discover_pdfs_single_pdf_file(tmp_path):
+    pdf_file = tmp_path / "paper.pdf"
+    pdf_file.write_bytes(b"fake pdf")
+    pdfs = discover_pdfs(pdf_file)
+    assert pdfs == [pdf_file]
+
+
+def test_discover_pdfs_single_non_pdf_file(tmp_path):
+    txt_file = tmp_path / "notes.txt"
+    txt_file.write_bytes(b"not a pdf")
+    pdfs = discover_pdfs(txt_file)
+    assert pdfs == []
