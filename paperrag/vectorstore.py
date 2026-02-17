@@ -10,8 +10,8 @@ from pathlib import Path
 import faiss
 import numpy as np
 
-from paper_rag.chunker import Chunk
-from paper_rag.config import PaperRAGConfig
+from paperrag.chunker import Chunk
+from paperrag.config import PaperRAGConfig
 
 logger = logging.getLogger(__name__)
 

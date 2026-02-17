@@ -4,7 +4,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from paper_rag.parser import compute_file_hash, discover_pdfs
+from paperrag.parser import compute_file_hash, discover_pdfs
 
 
 def test_compute_file_hash():

@@ -143,18 +143,18 @@ Commands:
 
 Index:
 
-    paper_rag index
-    paper_rag index --input-dir <path>
+    paperrag index
+    paperrag index --input-dir <path>
 
 Query:
 
-    paper_rag query "Your question"
-    paper_rag query --top-k 10
-    paper_rag query --no-llm
+    paperrag query "Your question"
+    paperrag query --top-k 10
+    paperrag query --no-llm
 
 Evaluate:
 
-    paper_rag evaluate --benchmark-file <file>
+    paperrag evaluate --benchmark-file <file>
 
 ------------------------------------------------------------------------
 

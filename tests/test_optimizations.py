@@ -8,11 +8,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from paper_rag.chunker import Chunk
-from paper_rag.config import IndexingConfig, PaperRAGConfig
-from paper_rag.vectorstore import VectorStore
+from paperrag.chunker import Chunk
+from paperrag.config import IndexingConfig, PaperRAGConfig
+from paperrag.vectorstore import VectorStore
 
-TMP_DIR = Path("/tmp/paper_rag_test_optimizations")
+TMP_DIR = Path("/tmp/paperrag_test_optimizations")
 
 
 @pytest.fixture(autouse=True)
@@ -165,7 +165,7 @@ def test_config_snapshot_compatibility():
 
 def test_parallel_hashing_function():
     """Test parallel file hashing works correctly."""
-    from paper_rag.parser import compute_file_hash, compute_file_hashes_parallel
+    from paperrag.parser import compute_file_hash, compute_file_hashes_parallel
 
     # Create test files
     test_dir = TMP_DIR / "test_pdfs"
@@ -191,7 +191,7 @@ def test_parallel_hashing_function():
 
 def test_embedder_cache():
     """Test that embedder is cached properly in retriever."""
-    from paper_rag.retriever import _embedder_cache
+    from paperrag.retriever import _embedder_cache
 
     # Clear cache
     _embedder_cache.clear()

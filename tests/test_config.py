@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from paper_rag.config import PaperRAGConfig
+from paperrag.config import PaperRAGConfig
 
 
 def test_default_config():

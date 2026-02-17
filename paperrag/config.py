@@ -14,15 +14,19 @@ def _default_input_dir() -> str:
     return str(Path.home() / "Documents" / "Mendeley Desktop")
 
 
-def _default_index_dir() -> str:
-    return str(Path.home() / ".paper_rag" / "index")
-
-
 class ParserConfig(BaseModel):
     """PDF parsing configuration."""
 
     extract_tables: bool = False
     fallback_to_raw: bool = True
+    ocr_mode: Literal["auto", "always", "never"] = Field(
+        default="auto",
+        description="OCR strategy: 'auto'=detect per PDF (recommended), 'always'=force OCR, 'never'=skip OCR"
+    )
+    manifest_file: str | None = Field(
+        default=None,
+        description="CSV manifest with columns: filename,title,authors,abstract,doi (optional)"
+    )
 
 
 class ChunkerConfig(BaseModel):
@@ -46,6 +50,27 @@ class RetrieverConfig(BaseModel):
     """Retrieval configuration."""
 
     top_k: int = Field(default=5, ge=1)
+    score_threshold: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score threshold (0.0 = no filtering)"
+    )
+    use_mmr: bool = Field(
+        default=False,
+        description="Use Maximal Marginal Relevance for diverse retrieval"
+    )
+    mmr_lambda: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="MMR lambda parameter (0=max diversity, 1=max relevance)"
+    )
+    max_results_per_paper: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum results from same paper (re-ranking)"
+    )
 
 
 class IndexingConfig(BaseModel):
@@ -84,12 +109,35 @@ class IndexingConfig(BaseModel):
     )
 
     def get_n_workers(self) -> int:
-        """Get actual worker count, auto-detecting if needed."""
+        """Get actual worker count, auto-detecting if needed.
+        
+        Uses RAM-aware calculation to prevent OOM kills:
+        - Each worker needs ~2GB during peak Docling usage
+        - Formula: min(cpu_cores - 1, available_ram_gb // 2)
+        """
         import multiprocessing
         if self.n_workers == 0:
-            # Auto-detect: use all CPUs - 1 (leave one for system/embedding)
+            # Auto-detect: balance CPU and RAM constraints
             cpu_count = multiprocessing.cpu_count()
-            return max(1, cpu_count - 1)
+            cpu_workers = max(1, cpu_count - 1)
+            
+            # RAM-aware calculation (2GB per worker budget)
+            try:
+                import psutil
+                available_gb = psutil.virtual_memory().available / (1024**3)
+                # Reserve 2GB for base system + embedding, rest for workers
+                ram_workers = max(1, int((available_gb - 2) / 2))
+                workers = min(cpu_workers, ram_workers)
+                if workers < cpu_workers:
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "Limited workers to %d (from %d) due to RAM constraints (%.1fGB available)",
+                        workers, cpu_workers, available_gb
+                    )
+                return workers
+            except ImportError:
+                # psutil not available, fall back to CPU-only calculation
+                return cpu_workers
         return self.n_workers
 
 
@@ -99,7 +147,7 @@ class LLMConfig(BaseModel):
     mode: Literal["local", "openai"] = "openai"
     model_name: str = "gpt-3.5-turbo"
     temperature: float = 0.0
-    max_tokens: int = 1024
+    max_tokens: int = 512
     api_base: str | None = None  # for Ollama: http://localhost:11434/v1
     api_key: str | None = None
 
@@ -118,7 +166,7 @@ class PaperRAGConfig(BaseModel):
     """Top-level configuration."""
 
     input_dir: str = Field(default_factory=_default_input_dir)
-    index_dir: str = Field(default_factory=_default_index_dir)
+    _index_dir: str | None = None  # Private field for custom index directory
 
     parser: ParserConfig = Field(default_factory=ParserConfig)
     chunker: ChunkerConfig = Field(default_factory=ChunkerConfig)
@@ -126,6 +174,18 @@ class PaperRAGConfig(BaseModel):
     retriever: RetrieverConfig = Field(default_factory=RetrieverConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+
+    @property
+    def index_dir(self) -> str:
+        """Return index directory - custom path if set, otherwise input_dir/.paperrag-index."""
+        if self._index_dir is not None:
+            return self._index_dir
+        return str(Path(self.input_dir) / ".paperrag-index")
+    
+    @index_dir.setter
+    def index_dir(self, value: str) -> None:
+        """Set custom index directory."""
+        self._index_dir = value
 
     def snapshot(self) -> dict:
         """Return a JSON-serialisable config snapshot for index metadata."""

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-def show_failed_pdfs(index_dir: str = "paper_rag/my_index", input_dir: str = None):
+def show_failed_pdfs(index_dir: str = "paperrag/my_index", input_dir: str = None):
     """Display failed and missing PDFs."""
     index_path = Path(index_dir)
     
@@ -83,9 +83,9 @@ if __name__ == "__main__":
         # Try to read input_dir from config
         try:
             import json
-            config = json.load(open("paper_rag/my_index/config_snapshot.json"))
+            config = json.load(open("paperrag/my_index/config_snapshot.json"))
             input_dir = config.get("input_dir")
-            show_failed_pdfs("paper_rag/my_index", input_dir)
+            show_failed_pdfs("paperrag/my_index", input_dir)
         except:
             print("Usage: python3 scripts/show_failed_pdfs.py [index_dir] [input_dir]")
             print("\nOr run without arguments to auto-detect from config_snapshot.json")

@@ -5,7 +5,7 @@ import pickle
 import sys
 from pathlib import Path
 
-def show_stats(index_dir: str = "paper_rag/my_index"):
+def show_stats(index_dir: str = "paperrag/my_index"):
     """Display index statistics."""
     index_path = Path(index_dir)
     

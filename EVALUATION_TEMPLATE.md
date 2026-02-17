@@ -36,7 +36,7 @@ Required metrics:
 
 ## Evaluation Command
 
-    paper_rag evaluate --benchmark-file benchmark.jsonl --top-k 5
+    paperrag evaluate --benchmark-file benchmark.jsonl --top-k 5
 
 ------------------------------------------------------------------------
 

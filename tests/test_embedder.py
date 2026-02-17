@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from paper_rag.config import EmbedderConfig
-from paper_rag.embedder import Embedder
+from paperrag.config import EmbedderConfig
+from paperrag.embedder import Embedder
 
 
 @pytest.fixture(scope="module")

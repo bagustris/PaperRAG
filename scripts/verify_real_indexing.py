@@ -32,7 +32,7 @@ def verify_indexing():
         
     # Run the index command
     cmd = [
-        sys.executable, "-m", "paper_rag.cli", "index",
+        sys.executable, "-m", "paperrag.cli", "index",
         "--input-dir", str(test_input_dir),
         "--index-dir", str(test_index_dir),
         "--workers", "2",

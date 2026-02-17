@@ -1,8 +1,8 @@
 """Tests for the chunker module."""
 
-from paper_rag.chunker import Chunk, chunk_paper, chunk_text
-from paper_rag.config import ChunkerConfig
-from paper_rag.parser import ParsedPaper, ParsedSection
+from paperrag.chunker import Chunk, chunk_paper, chunk_text
+from paperrag.config import ChunkerConfig
+from paperrag.parser import ParsedPaper, ParsedSection
 
 
 def test_chunk_text_basic():

@@ -75,7 +75,7 @@ paperrag index --input-dir ~/Documents/Mendeley\ Desktop/
 
 ### Python Configuration
 ```python
-from paper_rag.config import PaperRAGConfig
+from paperrag.config import PaperRAGConfig
 
 cfg = PaperRAGConfig()
 

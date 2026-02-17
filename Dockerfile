@@ -25,4 +25,4 @@ RUN . .venv/bin/activate &&     uv pip install -e .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["paper_rag", "index"]
+CMD ["paperrag", "index"]

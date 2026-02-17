@@ -7,12 +7,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from paper_rag.chunker import Chunk
-from paper_rag.config import PaperRAGConfig
-from paper_rag.vectorstore import VectorStore
+from paperrag.chunker import Chunk
+from paperrag.config import PaperRAGConfig
+from paperrag.vectorstore import VectorStore
 
 DIM = 16
-TMP_DIR = Path("/tmp/paper_rag_test_index")
+TMP_DIR = Path("/tmp/paperrag_test_index")
 
 
 @pytest.fixture(autouse=True)

@@ -6,8 +6,8 @@ import hashlib
 import logging
 from dataclasses import dataclass
 
-from paper_rag.config import ChunkerConfig
-from paper_rag.parser import ParsedPaper
+from paperrag.config import ChunkerConfig
+from paperrag.parser import ParsedPaper
 
 logger = logging.getLogger(__name__)
 

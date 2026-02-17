@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console
 from rich.table import Table
 
-from paper_rag import __version__
-from paper_rag.config import PaperRAGConfig
-from paper_rag.parser import discover_pdfs
+from paperrag import __version__
+from paperrag.config import PaperRAGConfig
+from paperrag.parser import discover_pdfs
 
 console = Console()
 
@@ -18,10 +20,11 @@ HELP_TEXT = """\
   [cyan]<any text>[/cyan]       Query the indexed papers (uses top-k retrieval + LLM)
   [cyan]index[/cyan]            Re-index the PDF directory
   [cyan]topk <n>[/cyan]         Set top-k for retrieval (default: 5)
+  [cyan]threshold <n>[/cyan]    Set similarity threshold 0.0-1.0 (default: 0.15)
+  [cyan]temperature <n>[/cyan]  Set LLM temperature 0.0-2.0 (default: 0.0)
   [cyan]no-llm[/cyan]           Toggle LLM off/on (retrieval-only mode)
-  [cyan]llm-mode <mode>[/cyan]  Set LLM mode (openai or local)
-  [cyan]llm-model <name>[/cyan] Set LLM model name
-  [cyan]config[/cyan]           Show current LLM configuration
+  [cyan]model <name>[/cyan]     Set LLM model name
+  [cyan]config[/cyan]           Show current configuration
   [cyan]help[/cyan]             Show this help message
   [cyan]exit[/cyan] / [cyan]quit[/cyan]      Exit the REPL
 """
@@ -31,12 +34,25 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     """Launch the interactive REPL session."""
     cfg = cfg or PaperRAGConfig()
     pdf_dir = Path(cfg.input_dir)
+    
+    # Discover PDFs without logging
+    import logging
+    parser_logger = logging.getLogger('paperrag.parser')
+    original_level = parser_logger.level
+    parser_logger.setLevel(logging.WARNING)  # Suppress INFO logs temporarily
     pdfs = discover_pdfs(pdf_dir)
+    parser_logger.setLevel(original_level)  # Restore original level
 
     console.print(f"\n[bold]PaperRAG[/bold] version [cyan]{__version__}[/cyan]")
-    console.print(f"PDF directory: {pdf_dir}")
 
-    from paper_rag.vectorstore import VectorStore
+    # Validate and display PDF directory
+    # if not pdf_dir.exists():
+    #     console.print(f"[yellow]Warning: PDF directory does not exist: {pdf_dir}[/yellow]")
+    #     console.print("[dim]You can specify a different directory with --input-dir <path>[/dim]\n")
+    # else:
+    #     console.print(f"PDF directory: {pdf_dir}")
+
+    from paperrag.vectorstore import VectorStore
 
     idx_dir = Path(cfg.index_dir)
 
@@ -58,23 +74,28 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print(f"Found [green]{len(pdfs)}[/green] PDFs")
             console.print(f"[yellow]Warning: Could not load index: {e}[/yellow]")
     else:
-        console.print(
-            f"Found [green]{len(pdfs)}[/green] PDFs - [yellow]{len(pdfs)} unindexed[/yellow]"
-        )
-        console.print(
-            "[yellow]No index found. Run [bold]index[/bold] to build one before querying.[/yellow]"
-        )
+        console.print(f"[red]Error: No index found at {idx_dir}[/red]")
+        console.print("Run [bold]paperrag index[/bold] to create an index before using the REPL.")
+        import sys
+        sys.exit(1)
 
     console.print(f"LLM: [cyan]{cfg.llm.mode}[/cyan] / [cyan]{cfg.llm.model_name}[/cyan]")
+    
+    # Display threshold filtering info
+    console.print(f"Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan] (minimum similarity score)")
+    
     console.print("Type [cyan]help[/cyan] for commands.\n")
 
     top_k = cfg.retriever.top_k
     use_llm = True
     retriever = None  # lazy-loaded on first query
 
+    # Create prompt session with history support for arrow keys
+    session = PromptSession(history=InMemoryHistory())
+
     while True:
         try:
-            command = console.input("[bold]paperrag>[/bold] ").strip()
+            command = session.prompt("paperrag> ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\nBye!")
             break
@@ -104,39 +125,66 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
                 console.print("[yellow]Usage: topk <number>[/yellow]")
             continue
 
+        if command.startswith("threshold"):
+            parts = command.split()
+            if len(parts) == 2:
+                try:
+                    threshold_val = float(parts[1])
+                    if 0.0 <= threshold_val <= 1.0:
+                        cfg.retriever.score_threshold = threshold_val
+                        console.print(f"Threshold set to [cyan]{threshold_val}[/cyan]")
+                    else:
+                        console.print("[yellow]Threshold must be between 0.0 and 1.0[/yellow]")
+                except ValueError:
+                    console.print("[yellow]Usage: threshold <number>[/yellow]")
+            else:
+                console.print("[yellow]Usage: threshold <number>[/yellow]")
+            continue
+
+        if command.startswith("temperature"):
+            parts = command.split()
+            if len(parts) == 2:
+                try:
+                    temp_val = float(parts[1])
+                    if 0.0 <= temp_val <= 2.0:
+                        cfg.llm.temperature = temp_val
+                        console.print(f"Temperature set to [cyan]{temp_val}[/cyan]")
+                    else:
+                        console.print("[yellow]Temperature must be between 0.0 and 2.0[/yellow]")
+                except ValueError:
+                    console.print("[yellow]Usage: temperature <number>[/yellow]")
+            else:
+                console.print("[yellow]Usage: temperature <number>[/yellow]")
+            continue
+
         if command == "no-llm":
             use_llm = not use_llm
             state = "[red]off[/red]" if not use_llm else "[green]on[/green]"
             console.print(f"LLM is now {state}")
             continue
 
-        if command.startswith("llm-mode"):
-            parts = command.split()
-            if len(parts) == 2 and parts[1] in ("openai", "local"):
-                cfg.llm.mode = parts[1]  # type: ignore[assignment]
-                console.print(f"LLM mode set to [cyan]{parts[1]}[/cyan]")
-            else:
-                console.print("[yellow]Usage: llm-mode <openai|local>[/yellow]")
-            continue
-
-        if command.startswith("llm-model"):
+        if command.startswith("model"):
             parts = command.split(maxsplit=1)
             if len(parts) == 2:
                 cfg.llm.model_name = parts[1]
-                console.print(f"LLM model set to [cyan]{parts[1]}[/cyan]")
+                console.print(f"LLM model set to {parts[1]}")
             else:
-                console.print("[yellow]Usage: llm-model <model-name>[/yellow]")
+                console.print("[yellow]Usage: model <model-name>[/yellow]")
             continue
 
         if command == "config":
-            console.print("\n[bold]Current LLM Configuration:[/bold]")
+            console.print("\n[bold]Current Configuration:[/bold]")
+            console.print("[bold]LLM:[/bold]")
             console.print(f"  Mode: [cyan]{cfg.llm.mode}[/cyan]")
             console.print(f"  Model: [cyan]{cfg.llm.model_name}[/cyan]")
             console.print(f"  Base URL: [cyan]{cfg.llm.api_base or 'default'}[/cyan]")
             console.print(f"  Temperature: [cyan]{cfg.llm.temperature}[/cyan]")
             console.print(f"  Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan]")
             api_key_status = "✓ set" if cfg.llm.resolve_api_key() else "✗ not set"
-            console.print(f"  API key: [cyan]{api_key_status}[/cyan]\n")
+            console.print(f"  API key: [cyan]{api_key_status}[/cyan]")
+            console.print("[bold]Retrieval:[/bold]")
+            console.print(f"  Top-k: [cyan]{top_k}[/cyan]")
+            console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]\n")
             continue
 
         # Anything else is treated as a query
@@ -151,7 +199,7 @@ def _ensure_retriever(retriever, cfg: PaperRAGConfig):
     if retriever is not None:
         return retriever
     try:
-        from paper_rag.retriever import Retriever
+        from paperrag.retriever import Retriever
 
         return Retriever(cfg)
     except FileNotFoundError as exc:
@@ -168,57 +216,76 @@ def _handle_query(
     use_llm: bool,
 ) -> None:
     """Run retrieval (and optionally LLM) for a user question."""
+    import time
+
+    t0 = time.perf_counter()
     results = retriever.retrieve(question, top_k=top_k)
+    t_retrieval = time.perf_counter() - t0
+
     if not results:
         console.print("[yellow]No results found.[/yellow]")
         return
-
-    table = Table(title="Retrieval Results")
-    table.add_column("#", style="dim", width=4)
-    table.add_column("Score", justify="right", width=8)
-    table.add_column("Paper", width=50, no_wrap=False)
-    table.add_column("Section", width=15)
-    table.add_column("Excerpt", max_width=60)
-    for i, r in enumerate(results, 1):
-        # Clean paper title - remove markdown artifacts
-        paper_title = r.paper_title.replace("<!--- image -->", "").replace("<!-- image -->", "").strip()
-        if not paper_title or paper_title == "Unknown":
-            # Use filename as fallback
-            paper_title = Path(r.file_path).stem
-
-        table.add_row(
-            str(i),
-            f"{r.score:.4f}",
-            paper_title[:80],
-            r.section_name[:15],
-            r.text[:120].replace("\n", " ") + "…",
-        )
-    console.print(table)
 
     if not use_llm:
         return
 
     try:
-        from paper_rag.llm import generate_answer
+        from paperrag.llm import generate_answer
 
         context_chunks = [r.text for r in results]
+        t1 = time.perf_counter()
         answer = generate_answer(question, context_chunks, cfg.llm)
+        t_llm = time.perf_counter() - t1
+
+        # Extract cited reference numbers from answer
+        import re
+        cited_nums = sorted(set(
+            int(m) for m in re.findall(r'\[(\d+)\]', answer)
+            if int(m) <= len(results)
+        ))
+
+        if cited_nums:
+            # Map each cited chunk number to its unique filename,
+            # then assign new numbers per unique file
+            old_to_new = {}
+            unique_files = []  # (new_num, filename)
+            file_to_new = {}
+            for old_num in cited_nums:
+                filename = Path(results[old_num - 1].file_path).name
+                if filename not in file_to_new:
+                    new_num = len(file_to_new) + 1
+                    file_to_new[filename] = new_num
+                    unique_files.append((new_num, filename))
+                old_to_new[old_num] = file_to_new[filename]
+
+            def replace_citation(match):
+                old_num = int(match.group(1))
+                if old_num in old_to_new:
+                    return f"[{old_to_new[old_num]}]"
+                return match.group(0)
+
+            answer = re.sub(r'\[(\d+)\]', replace_citation, answer)
 
         # Display answer
         console.print(f"\n[bold green]Answer:[/bold green]\n{answer}\n")
 
-        # Display references mapping
+        # Display references
         console.print("[bold]References:[/bold]")
-        for i, r in enumerate(results, 1):
-            # Clean paper title
-            paper_title = r.paper_title.replace("<!--- image -->", "").strip()
-            if not paper_title or paper_title == "Unknown":
-                paper_title = Path(r.file_path).stem
-
-            # Show reference with paper, section, and file path
-            console.print(f"  [cyan][{i}][/cyan] {paper_title} - {r.section_name}")
-            console.print(f"      [dim]{r.file_path}[/dim]")
-        console.print()
+        if cited_nums:
+            for new_num, filename in unique_files:
+                console.print(f"  [cyan][{new_num}][/cyan] {filename}")
+        else:
+            # Fallback: show all references deduplicated
+            seen = set()
+            ref_num = 1
+            for r in results:
+                filename = Path(r.file_path).name
+                if filename not in seen:
+                    console.print(f"  [cyan][{ref_num}][/cyan] {filename}")
+                    seen.add(filename)
+                    ref_num += 1
+        t_total = time.perf_counter() - t0
+        console.print(f"[dim]Retrieval: {t_retrieval:.2f}s | LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n")
 
     except ImportError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
@@ -231,19 +298,19 @@ def _handle_query(
 
 def _handle_index(cfg: PaperRAGConfig) -> None:
     """Run the indexing pipeline from inside the REPL."""
-    from paper_rag.chunker import chunk_paper
-    from paper_rag.embedder import Embedder
-    from paper_rag.parser import compute_file_hashes_parallel, discover_pdfs, parse_pdf
-    from paper_rag.parallel import parallel_process_pdfs
-    from paper_rag.vectorstore import VectorStore
+    from paperrag.chunker import chunk_paper
+    from paperrag.embedder import Embedder
+    from paperrag.parser import compute_file_hashes_parallel, discover_pdfs, parse_pdf
+    from paperrag.parallel import parallel_process_pdfs
+    from paperrag.vectorstore import VectorStore
 
-    pdf_dir = Path(cfg.input_dir)
+    # pdf_dir = Path(cfg.input_dir)
     idx_dir = Path(cfg.index_dir)
 
-    pdfs = discover_pdfs(pdf_dir)
-    if not pdfs:
-        console.print("[red]No PDFs found.[/red]")
-        return
+    # pdfs = discover_pdfs(pdf_dir)
+    # if not pdfs:
+    #     console.print("[red]No PDFs found.[/red]")
+    #     return
 
     embedder = Embedder(cfg.embedder)
 
@@ -295,7 +362,8 @@ def _handle_index(cfg: PaperRAGConfig) -> None:
         to_index,
         cfg.parser,
         cfg.chunker,
-        n_workers
+        n_workers,
+        timeout=cfg.indexing.pdf_timeout
     )
 
     # Sequential embed + add phase

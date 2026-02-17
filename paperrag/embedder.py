@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 
-from paper_rag.config import EmbedderConfig
+from paperrag.config import EmbedderConfig
 
 logger = logging.getLogger(__name__)
 

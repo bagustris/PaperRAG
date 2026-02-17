@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from paper_rag.chunker import Chunk
-    from paper_rag.config import ChunkerConfig, ParserConfig
+    from paperrag.chunker import Chunk
+    from paperrag.config import ChunkerConfig, ParserConfig
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 def process_single_pdf(
     pdf_path: Path,
     parser_config: ParserConfig,
-    chunker_config: ChunkerConfig
+    chunker_config: ChunkerConfig,
+    manifest: dict[str, dict[str, str]] | None = None
 ) -> tuple[Path, str | None, list[Chunk] | None, str | None]:
     """Process one PDF: parse + chunk (NOT embed yet).
 
@@ -26,6 +27,7 @@ def process_single_pdf(
         pdf_path: Path to PDF file
         parser_config: Parser configuration
         chunker_config: Chunker configuration
+        manifest: Optional manifest dict for fast metadata lookup
 
     Returns:
         Tuple of (pdf_path, file_hash, chunks, error_message)
@@ -33,10 +35,10 @@ def process_single_pdf(
         If failed: (pdf_path, None, None, error_message)
     """
     try:
-        from paper_rag.chunker import chunk_paper
-        from paper_rag.parser import parse_pdf
+        from paperrag.chunker import chunk_paper
+        from paperrag.parser import parse_pdf
 
-        paper = parse_pdf(pdf_path, parser_config)
+        paper = parse_pdf(pdf_path, parser_config, manifest)
         chunks = chunk_paper(paper, chunker_config)
         return (pdf_path, paper.file_hash, chunks, None)
     except Exception as e:
@@ -49,7 +51,8 @@ def parallel_process_pdfs(
     parser_config: ParserConfig,
     chunker_config: ChunkerConfig,
     n_workers: int,
-    timeout: int = 0
+    timeout: int = 0,
+    manifest: dict[str, dict[str, str]] | None = None
 ) -> list[tuple[Path, str | None, list[Chunk] | None, str | None]]:
     """Process PDFs in parallel, return parsed results.
 
@@ -59,6 +62,7 @@ def parallel_process_pdfs(
         chunker_config: Chunker configuration
         n_workers: Number of worker processes
         timeout: Timeout in seconds per PDF (0 = no timeout)
+        manifest: Optional manifest dict for fast metadata lookup
 
     Returns:
         List of tuples: (pdf_path, file_hash, chunks, error_message)
@@ -67,7 +71,7 @@ def parallel_process_pdfs(
         # Single-threaded mode (for debugging or compatibility)
         logger.info("Processing PDFs in single-threaded mode")
         return [
-            process_single_pdf(pdf, parser_config, chunker_config)
+            process_single_pdf(pdf, parser_config, chunker_config, manifest)
             for pdf in pdf_paths
         ]
 
@@ -77,7 +81,8 @@ def parallel_process_pdfs(
         process_fn = partial(
             process_single_pdf,
             parser_config=parser_config,
-            chunker_config=chunker_config
+            chunker_config=chunker_config,
+            manifest=manifest
         )
         
         if timeout > 0:
