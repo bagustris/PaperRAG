@@ -2,7 +2,7 @@
 
 Local-first Retrieval-Augmented Generation (RAG) system for querying academic PDF collections.
 
-Default PDF directory: `/home/$USER/Documents/Mendeley Desktop/`
+Demo:  https://asciinema.org/a/788900  
 
 ------------------------------------------------------------------------
 
@@ -42,21 +42,21 @@ Default PDF directory: `/home/$USER/Documents/Mendeley Desktop/`
 
 ```bash
 # 1. Index your PDFs (one time)
-paperrag index
+paperrag index -i test_pdfs
 
 # 2. Start REPL with local LLM (best for multiple queries)
-paperrag -m qwen3:1.7b
+paperrag -i test_pdfs -m qwen2.5:1.5b  
 
 # OR use one-off query command (for single questions)
-paperrag query "your question" -m qwen3:1.7b
+paperrag query "your question" -i test_pdfs
 ```
 
 **REPL vs Query Command:**
 
 | Mode | Use When | Pros |
 |------|----------|------|
-| **REPL** `paperrag -m qwen3:1.7b` | Multiple questions, exploring papers | Fast (index loaded once), interactive, can adjust settings |
-| **Query** `paperrag query "..." -m qwen3:1.7b` | Single question, scripting | Simple, good for automation |
+| **REPL** `paperrag -i test_pdfs` | Multiple questions, exploring papers | Fast (index loaded once), interactive, can adjust settings |
+| **Query** `paperrag query "..." -i test_pdfs` | Single question, scripting | Simple, good for automation |
 
 ------------------------------------------------------------------------
 
@@ -117,11 +117,11 @@ PaperRAG automatically detects if each PDF needs OCR:
 
 Query with local LLM (Ollama):
 
-    paperrag query "what is speech chain?" -m qwen3:1.7b
+    paperrag query "what is speech chain?" -i test_pdfs
 
-Query with similarity threshold:
+Query with custom top-k:
 
-    paperrag query "what is speech chain?" -m qwen3:1.7b --threshold 0.3
+    paperrag query "what is speech chain?" -i test_pdfs --topk 5
 
 **Note:** Each query reloads the index. For multiple questions, use REPL mode.
 
@@ -132,22 +132,24 @@ Query with similarity threshold:
 **Best practice - start REPL with LLM configured:**
 
 ```bash
-# With local Ollama
-paperrag -m qwen3:1.7b
+# With index directory
+paperrag --index-dir /path/to/index
 
-# With custom index directory
-paperrag --index-dir /path/to/index -m qwen3:1.7b
+# With custom model
+paperrag -i /path/to/index --model qwen3:1.7b
 
-# With similarity threshold
-paperrag -m qwen3:1.7b --threshold 0.3
+# With custom top-k
+paperrag -i /path/to/index --topk 5
 ```
 
 **CLI Options for REPL:**
-- `--model, -m <name>` - Set LLM model (e.g., `qwen3:1.7b`)
-- `--index-dir, -i <path>` - Custom index directory
+- `--model, -m <name>` - Set LLM model (default: `qwen2.5:1.5b`)
+- `--index-dir, -i <path>` - Custom index directory (required)
 - `--input-dir, -d <path>` - PDF directory
-- `--threshold, -t <float>` - Similarity score threshold (0.0-1.0)
-- `--temperature <float>` - LLM temperature (0.0-2.0)
+- `--topk, -k <int>` - Number of chunks to retrieve (default: 1)
+- `--threshold, -t <float>` - Similarity score threshold (default: 0.1)
+- `--temperature <float>` - LLM temperature (default: 0.0)
+- `--max-tokens <int>` - Max output tokens (default: 512)
 - `--version` - Show version info
 
 **Why REPL mode is recommended:**
@@ -158,26 +160,25 @@ paperrag -m qwen3:1.7b --threshold 0.3
 
 **Example session:**
 
-    $ paperrag -m qwen3:1.7b
+    $ paperrag -i test_pdfs
 
-    PaperRAG version 0.1.0
-    PDF directory: /home/bagus/Documents/Mendeley Desktop
-    Found 2949 PDFs - 347 unindexed
-    LLM: local / qwen3:1.7b
+    PaperRAG version 0.2.0
+    Found 10 PDFs - all indexed
+    LLM: qwen2.5:1.5b
+    Top-k: 1 (retrieve 1 chunks)
+    Threshold: 0.1 (minimum similarity score)
+    Temperature: 0.0 (0.0=deterministic, higher=creative)
+    Max tokens: 512 (max output length)
     Type help for commands.
 
-    paperrag> what is speech chain?
-    [retrieval results + answer with numbered citations]
+    paperrag> What is a Python package to predict speaker characteristics called?
+
+    Answer:
+    Nkululeko is a tool for rapid speaker characteristics detection.
 
     References:
-      [1] Author et al. - 2020 - Paper Title.pdf
-      [2] Author et al. - 2019 - Another Paper.pdf
-
-    paperrag> topk 10
-    top-k set to 10
-
-    paperrag> threshold 0.3
-    Threshold set to 0.30
+      [1] example_paper.pdf
+    Retrieval: 0.02s | LLM: 2.15s | Total: 2.17s
 
     paperrag> exit
     Bye!
@@ -186,11 +187,12 @@ paperrag -m qwen3:1.7b --threshold 0.3
 
     <any text>           Query the indexed papers
     index                Re-index the PDF directory
-    topk <n>             Set top-k for retrieval (default: 5)
-    threshold <n>        Set similarity threshold (0.0-1.0)
-    temperature <n>      Set LLM temperature (0.0-2.0)
-    model <name>         Set LLM model name
-    config               Show current LLM configuration
+    topk <n>             Set top-k for retrieval (default: 1)
+    threshold <n>        Set similarity threshold (default: 0.1)
+    temperature <n>      Set LLM temperature (default: 0.0)
+    max-tokens <n>       Set max output tokens (default: 512)
+    model <name>         Set LLM model name (default: qwen2.5:1.5b)
+    config               Show current configuration
     help                 Show help message
     exit / quit          Exit the REPL
 
@@ -200,14 +202,20 @@ paperrag -m qwen3:1.7b --threshold 0.3
 
 PaperRAG uses a local LLM via [Ollama](https://ollama.com).
 
-Install Ollama, then pull a model:
+**Default model:** `qwen2.5:1.5b` (lightweight, fast inference)
 
-    ollama pull qwen3:1.7b
+Install Ollama, then pull the default model:
 
-Use with PaperRAG:
+    ollama pull qwen2.5:1.5b
 
-    paperrag -m qwen3:1.7b
-    paperrag query "your question" -m qwen3:1.7b
+Use with PaperRAG (uses default model):
+
+    paperrag -i test_pdfs
+
+Use with a different model:
+
+    paperrag -i test_pdfs --model llama2:7b
+    paperrag query "your question" -i test_pdfs --model neural-chat
 
 ------------------------------------------------------------------------
 
