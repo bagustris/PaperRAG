@@ -55,7 +55,7 @@ paperrag query "your question" -i test_pdfs
 
 | Mode | Use When | Pros |
 |------|----------|------|
-| **REPL** `paperrag -i test_pdfs` | Multiple questions, exploring papers | Fast (index loaded once), interactive, can adjust settings |
+| **REPL** `paperrag -i test_pdfs -m /path/to/index` | Multiple questions, exploring papers | Fast (index loaded once), interactive, can adjust settings |
 | **Query** `paperrag query "..." -i test_pdfs` | Single question, scripting | Simple, good for automation |
 
 ------------------------------------------------------------------------
@@ -63,10 +63,6 @@ paperrag query "your question" -i test_pdfs
 ### Index PDFs
 
 Standard indexing (with adaptive OCR):
-
-    paperrag index
-
-Custom directory:
 
     paperrag index --input-dir /path/to/pdfs
 
@@ -117,11 +113,11 @@ PaperRAG automatically detects if each PDF needs OCR:
 
 Query with local LLM (Ollama):
 
-    paperrag query "what is speech chain?" -i test_pdfs
+    paperrag query "what is speech chain?" -i test_pdfs -m model  
 
 Query with custom top-k:
 
-    paperrag query "what is speech chain?" -i test_pdfs --topk 5
+    paperrag query "what is speech chain?" -i test_pdfs --topk 5 -m model  
 
 **Note:** Each query reloads the index. For multiple questions, use REPL mode.
 
@@ -133,13 +129,10 @@ Query with custom top-k:
 
 ```bash
 # With index directory
-paperrag --index-dir /path/to/index
-
-# With custom model
-paperrag -i /path/to/index --model qwen3:1.7b
+paperrag -i /path/to/index -m model
 
 # With custom top-k
-paperrag -i /path/to/index --topk 5
+paperrag -i /path/to/index --topk 5 -m model
 ```
 
 **CLI Options for REPL:**
@@ -160,7 +153,7 @@ paperrag -i /path/to/index --topk 5
 
 **Example session:**
 
-    $ paperrag -i test_pdfs
+    $ paperrag -i test_pdfs -m qwen2.5:1.5b  
 
     PaperRAG version 0.2.0
     Found 10 PDFs - all indexed
@@ -183,26 +176,13 @@ paperrag -i /path/to/index --topk 5
     paperrag> exit
     Bye!
 
-**REPL Commands:**
-
-    <any text>           Query the indexed papers
-    index                Re-index the PDF directory
-    topk <n>             Set top-k for retrieval (default: 1)
-    threshold <n>        Set similarity threshold (default: 0.1)
-    temperature <n>      Set LLM temperature (default: 0.0)
-    max-tokens <n>       Set max output tokens (default: 512)
-    model <name>         Set LLM model name (default: qwen2.5:1.5b)
-    config               Show current configuration
-    help                 Show help message
-    exit / quit          Exit the REPL
-
 ------------------------------------------------------------------------
 
 ## LLM Configuration
 
 PaperRAG uses a local LLM via [Ollama](https://ollama.com).
 
-**Default model:** `qwen2.5:1.5b` (lightweight, fast inference)
+**Recommended model:** `qwen2.5:1.5b` (lightweight, fast inference)
 
 Install Ollama, then pull the default model:
 
@@ -210,7 +190,7 @@ Install Ollama, then pull the default model:
 
 Use with PaperRAG (uses default model):
 
-    paperrag -i test_pdfs
+    paperrag -i test_pdfs -m qwen2.5:1.5b
 
 Use with a different model:
 
