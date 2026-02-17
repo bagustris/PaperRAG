@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def _default_input_dir() -> str:
@@ -144,12 +144,19 @@ class IndexingConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM configuration."""
 
-    mode: Literal["local", "openai"] = "openai"
-    model_name: str = "gpt-3.5-turbo"
+    model_name: str = "qwen3:1.7b"
     temperature: float = 0.0
     max_tokens: int = 512
-    api_base: str | None = None  # for Ollama: http://localhost:11434/v1
+    api_base: str = "http://localhost:11434/v1"
     api_key: str | None = None
+
+    @field_validator("api_base", mode="before")
+    @classmethod
+    def _coerce_api_base(cls, v: object) -> str:
+        """Accept None from old config snapshots, fall back to local Ollama default."""
+        if v is None:
+            return "http://localhost:11434/v1"
+        return str(v)
 
     def resolve_api_key(self) -> str:
         if self.api_key:
@@ -157,9 +164,7 @@ class LLMConfig(BaseModel):
         env_key = os.getenv("OPENAI_API_KEY", "")
         if env_key:
             return env_key
-        if self.mode == "local":
-            return "not-needed"
-        return ""
+        return "not-needed"
 
 
 class PaperRAGConfig(BaseModel):

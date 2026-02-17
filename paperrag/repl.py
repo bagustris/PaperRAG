@@ -79,7 +79,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         import sys
         sys.exit(1)
 
-    console.print(f"LLM: [cyan]{cfg.llm.mode}[/cyan] / [cyan]{cfg.llm.model_name}[/cyan]")
+    console.print(f"LLM: [cyan]{cfg.llm.model_name}[/cyan]")
     
     # Display threshold filtering info
     console.print(f"Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan] (minimum similarity score)")
@@ -175,13 +175,10 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         if command == "config":
             console.print("\n[bold]Current Configuration:[/bold]")
             console.print("[bold]LLM:[/bold]")
-            console.print(f"  Mode: [cyan]{cfg.llm.mode}[/cyan]")
             console.print(f"  Model: [cyan]{cfg.llm.model_name}[/cyan]")
-            console.print(f"  Base URL: [cyan]{cfg.llm.api_base or 'default'}[/cyan]")
+            console.print(f"  Base URL: [cyan]{cfg.llm.api_base}[/cyan]")
             console.print(f"  Temperature: [cyan]{cfg.llm.temperature}[/cyan]")
             console.print(f"  Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan]")
-            api_key_status = "✓ set" if cfg.llm.resolve_api_key() else "✗ not set"
-            console.print(f"  API key: [cyan]{api_key_status}[/cyan]")
             console.print("[bold]Retrieval:[/bold]")
             console.print(f"  Top-k: [cyan]{top_k}[/cyan]")
             console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]\n")
@@ -230,15 +227,28 @@ def _handle_query(
         return
 
     try:
-        from paperrag.llm import generate_answer
+        import re
+        import sys
+
+        from paperrag.llm import stream_answer
 
         context_chunks = [r.text for r in results]
+        full_answer = ""
+        header_printed = False
         t1 = time.perf_counter()
-        answer = generate_answer(question, context_chunks, cfg.llm)
+        for chunk in stream_answer(question, context_chunks, cfg.llm):
+            if not header_printed:
+                console.print("\n[bold green]Answer:[/bold green]")
+                header_printed = True
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+            full_answer += chunk
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
         t_llm = time.perf_counter() - t1
+        answer = full_answer.strip()
 
         # Extract cited reference numbers from answer
-        import re
         cited_nums = sorted(set(
             int(m) for m in re.findall(r'\[(\d+)\]', answer)
             if int(m) <= len(results)
@@ -266,9 +276,6 @@ def _handle_query(
 
             answer = re.sub(r'\[(\d+)\]', replace_citation, answer)
 
-        # Display answer
-        console.print(f"\n[bold green]Answer:[/bold green]\n{answer}\n")
-
         # Display references
         console.print("[bold]References:[/bold]")
         if cited_nums:
@@ -293,7 +300,11 @@ def _handle_query(
         # LLM not configured - this is fine, just skip it
         console.print(f"\n[dim]💡 {exc}[/dim]\n")
     except Exception as exc:
-        console.print(f"[red]LLM error: {exc}[/red]")
+        from paperrag.llm import describe_llm_error
+        error_msg, hint = describe_llm_error(exc, cfg.llm.model_name)
+        console.print(f"[red]{error_msg}[/red]")
+        if hint:
+            console.print(f"[yellow]Fix: {hint}[/yellow]")
 
 
 def _handle_index(cfg: PaperRAGConfig) -> None:

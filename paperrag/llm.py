@@ -1,8 +1,9 @@
-"""LLM module supporting local (Ollama) and OpenAI-compatible APIs."""
+"""LLM module supporting local (Ollama) and any OpenAI-compatible API."""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 
 from paperrag.config import LLMConfig
 
@@ -45,7 +46,7 @@ def _build_prompt(question: str, context_chunks: list[str]) -> str:
 
 def _check_ollama_model_available(model_name: str, base_url: str = "http://localhost:11434") -> bool:
     """Check if a model is available in Ollama.
-    
+
     Returns True if the model is available, False otherwise.
     Uses fuzzy matching to handle version differences (e.g., llama3.2:3b vs llama3.2:2b).
     """
@@ -55,11 +56,11 @@ def _check_ollama_model_available(model_name: str, base_url: str = "http://local
         if response.status_code == 200:
             data = response.json()
             available_models = [model["name"] for model in data.get("models", [])]
-            
+
             # Exact match first
             if model_name in available_models:
                 return True
-            
+
             # Fuzzy match: check if base model name (without version tag) exists
             # e.g., "llama3.2:3b" -> check for any "llama3.2:*"
             base_model = model_name.split(':')[0] if ':' in model_name else model_name
@@ -67,7 +68,7 @@ def _check_ollama_model_available(model_name: str, base_url: str = "http://local
                 available_base = available.split(':')[0] if ':' in available else available
                 if base_model == available_base:
                     return True
-            
+
             return False
         return False
     except Exception:
@@ -76,50 +77,27 @@ def _check_ollama_model_available(model_name: str, base_url: str = "http://local
         return True
 
 
+def _is_local_ollama(api_base: str) -> bool:
+    """Return True if api_base looks like a local Ollama endpoint."""
+    return "localhost" in api_base or "127.0.0.1" in api_base or "11434" in api_base
 
-def generate_answer(
+
+def _prepare(
     question: str,
     context_chunks: list[str],
-    config: LLMConfig | None = None,
-) -> str:
-    """Generate an answer using the configured LLM backend.
+    config: LLMConfig,
+) -> tuple:
+    """Shared setup: build prompt, get/cache client, return (client, messages).
 
-    Supports two modes:
-    - **openai**: Any OpenAI-compatible API (OpenAI, Ollama via /v1, etc.)
-    - **local**: Same as openai but defaults api_base to localhost Ollama.
+    Raises ValueError if context is empty.
     """
-    config = config or LLMConfig()
-
-    if not context_chunks:
-        return "No context available to answer the question."
+    from openai import OpenAI
 
     user_prompt = _build_prompt(question, context_chunks)
 
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise ImportError(
-            "The 'openai' package is required for LLM support. "
-            "Install with: uv pip install paper-rag[llm]"
-        )
-
     api_key = config.resolve_api_key()
     base_url = config.api_base
-    if config.mode == "local" and not base_url:
-        base_url = "http://localhost:11434/v1"
-    if not api_key and config.mode == "local":
-        api_key = "not-needed"
 
-    # Validate API key for OpenAI mode
-    if config.mode == "openai" and not api_key:
-        raise ValueError(
-            "LLM answer generation skipped (no API key configured). To enable:\n"
-            "  • Set OPENAI_API_KEY environment variable, or\n"
-            "  • Use --model <name> for local Ollama models, or\n"
-            "  • Use --no-llm to suppress this message"
-        )
-
-    # Reuse cached client for same base_url to avoid connection overhead
     cache_key = f"{base_url}|{api_key}"
     if cache_key in _client_cache:
         client = _client_cache[cache_key]
@@ -127,10 +105,9 @@ def generate_answer(
         client = OpenAI(api_key=api_key, base_url=base_url)
         _client_cache[cache_key] = client
 
-    # Check if local model is available in Ollama (only once per model)
-    if config.mode == "local" and config.model_name not in _model_checked:
-        # Strip /v1 suffix from base_url for Ollama API check
-        check_url = (base_url or "http://localhost:11434").replace("/v1", "").rstrip("/")
+    # Check if local Ollama model is available (only once per model)
+    if _is_local_ollama(base_url) and config.model_name not in _model_checked:
+        check_url = base_url.replace("/v1", "").rstrip("/")
         if not _check_ollama_model_available(config.model_name, check_url):
             logger.warning(
                 "Model '%s' not found in Ollama. Available models can be listed with: ollama list\n"
@@ -140,12 +117,7 @@ def generate_answer(
             )
         _model_checked.add(config.model_name)
 
-    logger.info(
-        "Calling LLM (%s, model=%s, temp=%.2f)",
-        config.mode,
-        config.model_name,
-        config.temperature,
-    )
+    logger.info("Calling LLM (model=%s, temp=%.2f)", config.model_name, config.temperature)
 
     # For Qwen3 models, append /no_think to disable the slow "thinking" mode.
     # Thinking mode generates a long internal reasoning chain before answering,
@@ -154,14 +126,96 @@ def generate_answer(
     if "qwen3" in model_lower or "qwen-3" in model_lower:
         user_prompt += " /no_think"
 
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    return client, messages
+
+
+def generate_answer(
+    question: str,
+    context_chunks: list[str],
+    config: LLMConfig | None = None,
+) -> str:
+    """Generate an answer using the configured LLM backend (blocking)."""
+    config = config or LLMConfig()
+
+    if not context_chunks:
+        return "No context available to answer the question."
+
+    try:
+        client, messages = _prepare(question, context_chunks, config)
+    except ImportError:
+        raise ImportError(
+            "The 'openai' package is required. Install with: uv pip install openai"
+        )
+
     response = client.chat.completions.create(
         model=config.model_name,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
+        messages=messages,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
     )
-    answer = response.choices[0].message.content or ""
-    return answer.strip()
+    return (response.choices[0].message.content or "").strip()
+
+
+def stream_answer(
+    question: str,
+    context_chunks: list[str],
+    config: LLMConfig | None = None,
+) -> Iterator[str]:
+    """Yield text chunks as they arrive from the LLM (streaming).
+
+    Usage::
+
+        for chunk in stream_answer(question, chunks, cfg.llm):
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+    """
+    config = config or LLMConfig()
+
+    if not context_chunks:
+        yield "No context available to answer the question."
+        return
+
+    try:
+        client, messages = _prepare(question, context_chunks, config)
+    except ImportError:
+        raise ImportError(
+            "The 'openai' package is required. Install with: uv pip install openai"
+        )
+
+    response = client.chat.completions.create(
+        model=config.model_name,
+        messages=messages,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        stream=True,
+    )
+    for chunk in response:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
+def describe_llm_error(exc: Exception, model_name: str) -> tuple[str, str | None]:
+    """Return (short_error, optional_hint) for a human-readable LLM error message.
+
+    The hint is non-None when there's a concrete remediation action.
+    """
+    msg = str(exc)
+    try:
+        from openai import APIStatusError
+        if isinstance(exc, APIStatusError) and exc.status_code == 500:
+            if "missing tensor" in msg or "failed to load model" in msg:
+                return (
+                    f"Model '{model_name}' failed to load (corrupted download).",
+                    f"ollama pull {model_name}",
+                )
+            return (f"Ollama returned a server error for '{model_name}'.", None)
+        if isinstance(exc, APIStatusError):
+            return (f"API error {exc.status_code}: {exc.message}", None)
+    except ImportError:
+        pass
+    return (f"LLM error: {msg}", None)

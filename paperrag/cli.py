@@ -82,10 +82,10 @@ def entrypoint(
     version: bool = typer.Option(None, "--version", callback=version_callback, is_eager=True, help="Show version and license"),
     input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory to index"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (will auto-discover .paperrag-index subdirectory if needed)"),
-    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b for local, gpt-4 for OpenAI)"),
+    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0, default: 0.15)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    api_base: str = typer.Option(None, "--api-base", "-a", help="API base URL (implies OpenAI mode)"),
+    api_base: str = typer.Option(None, "--api-base", "-a", help="API base URL (default: http://localhost:11434/v1)"),
 ) -> None:
     """PaperRAG - local RAG for academic PDFs."""
     if ctx.invoked_subcommand is None:
@@ -135,14 +135,9 @@ def entrypoint(
         if input_dir:
             cfg.input_dir = input_dir
         
-        # Auto-detect LLM mode based on arguments
         if api_base:
-            cfg.llm.mode = "openai"  # type: ignore[assignment]
             cfg.llm.api_base = api_base
-        elif model:
-            # If model is specified without api_base, assume local mode
-            cfg.llm.mode = "local"  # type: ignore[assignment]
-        
+
         if model:
             cfg.llm.model_name = model
 
@@ -475,8 +470,8 @@ def query(
     no_llm: bool = typer.Option(False, "--no-llm", help="Retrieval only, skip LLM"),
     input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (required)"),
-    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b for local, gpt-4 for OpenAI)"),
-    api_base: str = typer.Option(None, "--api-base", help="API base URL (implies OpenAI mode)"),
+    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
+    api_base: str = typer.Option(None, "--api-base", help="API base URL (default: http://localhost:11434/v1)"),
 ) -> None:
     """Query the indexed papers."""
     from paperrag.retriever import Retriever
@@ -503,15 +498,10 @@ def query(
 
     if index_dir:
         cfg.index_dir = index_dir
-    
-    # Auto-detect LLM mode based on arguments
+
     if api_base:
-        cfg.llm.mode = "openai"  # type: ignore[assignment]
         cfg.llm.api_base = api_base
-    elif model:
-        # If model is specified without api_base, assume local mode
-        cfg.llm.mode = "local"  # type: ignore[assignment]
-    
+
     if model:
         cfg.llm.model_name = model
 
@@ -565,15 +555,27 @@ def query(
         console.print()
         return
 
-    from paperrag.llm import generate_answer
-    from pathlib import Path as PathlibPath
     import re
+    import sys
+    from paperrag.llm import stream_answer
+    from pathlib import Path as PathlibPath
 
     context_chunks = [r.text for r in results]
     try:
+        full_answer = ""
+        header_printed = False
         t1 = time.perf_counter()
-        answer = generate_answer(question, context_chunks, cfg.llm)
+        for chunk in stream_answer(question, context_chunks, cfg.llm):
+            if not header_printed:
+                console.print("\n[bold green]Answer:[/bold green]")
+                header_printed = True
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+            full_answer += chunk
+        sys.stdout.write("\n")
+        sys.stdout.flush()
         t_llm = time.perf_counter() - t1
+        answer = full_answer.strip()
 
         # Extract cited reference numbers from answer
         cited_nums = sorted(set(
@@ -603,10 +605,6 @@ def query(
 
             answer = re.sub(r'\[(\d+)\]', replace_citation, answer)
 
-        # Display answer
-        console.print("\n[bold green]Answer:[/bold green]")
-        console.print(answer)
-
         # Display references
         console.print("\n[bold]References:[/bold]")
         if cited_nums:
@@ -631,7 +629,11 @@ def query(
         # LLM not configured - this is fine, just skip it
         console.print(f"\n[dim]💡 {exc}[/dim]")
     except Exception as exc:
-        console.print(f"[red]LLM error: {exc}[/red]")
+        from paperrag.llm import describe_llm_error
+        error_msg, hint = describe_llm_error(exc, cfg.llm.model_name)
+        console.print(f"[red]{error_msg}[/red]")
+        if hint:
+            console.print(f"[yellow]Fix: {hint}[/yellow]")
 
 
 # -- evaluate --------------------------------------------------------------
@@ -660,7 +662,7 @@ def evaluate(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
-    from evaluate_paper import evaluate as run_eval
+    from paperrag.benchmark import evaluate as run_eval
 
     results = run_eval(
         benchmark_file,
