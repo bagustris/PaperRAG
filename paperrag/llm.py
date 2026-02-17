@@ -1,4 +1,4 @@
-"""LLM module supporting local (Ollama) and any OpenAI-compatible API."""
+"""LLM module for local Ollama inference via OpenAI-compatible API."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from paperrag.config import LLMConfig
 logger = logging.getLogger(__name__)
 
 # Module-level client cache to avoid reconnection overhead per query
-_client_cache: dict[str, object] = {}
+_client_cache: object | None = None
 _model_checked: set[str] = set()
 
 SYSTEM_PROMPT = (
@@ -44,7 +44,11 @@ def _build_prompt(question: str, context_chunks: list[str]) -> str:
     )
 
 
-def _check_ollama_model_available(model_name: str, base_url: str = "http://localhost:11434") -> bool:
+_OLLAMA_BASE_URL = "http://localhost:11434"
+_OLLAMA_API_URL = f"{_OLLAMA_BASE_URL}/v1"
+
+
+def _check_ollama_model_available(model_name: str) -> bool:
     """Check if a model is available in Ollama.
 
     Returns True if the model is available, False otherwise.
@@ -52,7 +56,7 @@ def _check_ollama_model_available(model_name: str, base_url: str = "http://local
     """
     try:
         import requests
-        response = requests.get(f"{base_url}/api/tags", timeout=2)
+        response = requests.get(f"{_OLLAMA_BASE_URL}/api/tags", timeout=2)
         if response.status_code == 200:
             data = response.json()
             available_models = [model["name"] for model in data.get("models", [])]
@@ -77,11 +81,6 @@ def _check_ollama_model_available(model_name: str, base_url: str = "http://local
         return True
 
 
-def _is_local_ollama(api_base: str) -> bool:
-    """Return True if api_base looks like a local Ollama endpoint."""
-    return "localhost" in api_base or "127.0.0.1" in api_base or "11434" in api_base
-
-
 def _prepare(
     question: str,
     context_chunks: list[str],
@@ -91,24 +90,20 @@ def _prepare(
 
     Raises ValueError if context is empty.
     """
+    global _client_cache
     from openai import OpenAI
 
     user_prompt = _build_prompt(question, context_chunks)
 
-    api_key = config.resolve_api_key()
-    base_url = config.api_base
-
-    cache_key = f"{base_url}|{api_key}"
-    if cache_key in _client_cache:
-        client = _client_cache[cache_key]
+    if _client_cache is not None:
+        client = _client_cache
     else:
-        client = OpenAI(api_key=api_key, base_url=base_url)
-        _client_cache[cache_key] = client
+        client = OpenAI(api_key="not-needed", base_url=_OLLAMA_API_URL)
+        _client_cache = client
 
-    # Check if local Ollama model is available (only once per model)
-    if _is_local_ollama(base_url) and config.model_name not in _model_checked:
-        check_url = base_url.replace("/v1", "").rstrip("/")
-        if not _check_ollama_model_available(config.model_name, check_url):
+    # Check if Ollama model is available (only once per model)
+    if config.model_name not in _model_checked:
+        if not _check_ollama_model_available(config.model_name):
             logger.warning(
                 "Model '%s' not found in Ollama. Available models can be listed with: ollama list\n"
                 "To pull this model, run: ollama pull %s",

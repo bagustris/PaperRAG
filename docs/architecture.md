@@ -63,7 +63,7 @@ PDF Files
 
 ### `llm.py` -- LLM Integration
 
-- OpenAI-compatible API (works with Ollama and OpenAI)
+- Local Ollama inference via OpenAI-compatible API
 - Streaming responses with citation support
 - Descriptive error messages for common LLM failures
 

@@ -22,7 +22,6 @@ HELP_TEXT = """\
   [cyan]topk <n>[/cyan]         Set top-k for retrieval (default: 5)
   [cyan]threshold <n>[/cyan]    Set similarity threshold 0.0-1.0 (default: 0.15)
   [cyan]temperature <n>[/cyan]  Set LLM temperature 0.0-2.0 (default: 0.0)
-  [cyan]no-llm[/cyan]           Toggle LLM off/on (retrieval-only mode)
   [cyan]model <name>[/cyan]     Set LLM model name
   [cyan]config[/cyan]           Show current configuration
   [cyan]help[/cyan]             Show this help message
@@ -87,7 +86,6 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     console.print("Type [cyan]help[/cyan] for commands.\n")
 
     top_k = cfg.retriever.top_k
-    use_llm = True
     retriever = None  # lazy-loaded on first query
 
     # Create prompt session with history support for arrow keys
@@ -157,12 +155,6 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
                 console.print("[yellow]Usage: temperature <number>[/yellow]")
             continue
 
-        if command == "no-llm":
-            use_llm = not use_llm
-            state = "[red]off[/red]" if not use_llm else "[green]on[/green]"
-            console.print(f"LLM is now {state}")
-            continue
-
         if command.startswith("model"):
             parts = command.split(maxsplit=1)
             if len(parts) == 2:
@@ -176,7 +168,6 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print("\n[bold]Current Configuration:[/bold]")
             console.print("[bold]LLM:[/bold]")
             console.print(f"  Model: [cyan]{cfg.llm.model_name}[/cyan]")
-            console.print(f"  Base URL: [cyan]{cfg.llm.api_base}[/cyan]")
             console.print(f"  Temperature: [cyan]{cfg.llm.temperature}[/cyan]")
             console.print(f"  Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan]")
             console.print("[bold]Retrieval:[/bold]")
@@ -188,7 +179,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         retriever = _ensure_retriever(retriever, cfg)
         if retriever is None:
             continue
-        _handle_query(command, retriever, cfg, top_k=top_k, use_llm=use_llm)
+        _handle_query(command, retriever, cfg, top_k=top_k)
 
 
 def _ensure_retriever(retriever, cfg: PaperRAGConfig):
@@ -210,9 +201,8 @@ def _handle_query(
     cfg: PaperRAGConfig,
     *,
     top_k: int,
-    use_llm: bool,
 ) -> None:
-    """Run retrieval (and optionally LLM) for a user question."""
+    """Run retrieval and LLM for a user question."""
     import time
 
     t0 = time.perf_counter()
@@ -221,9 +211,6 @@ def _handle_query(
 
     if not results:
         console.print("[yellow]No results found.[/yellow]")
-        return
-
-    if not use_llm:
         return
 
     try:
@@ -248,42 +235,28 @@ def _handle_query(
         t_llm = time.perf_counter() - t1
         answer = full_answer.strip()
 
-        # Extract cited reference numbers from answer
+        # Extract cited reference numbers from the streamed answer (keep original numbers
+        # so they match what was already printed to the terminal).
         cited_nums = sorted(set(
             int(m) for m in re.findall(r'\[(\d+)\]', answer)
             if int(m) <= len(results)
         ))
 
-        if cited_nums:
-            # Map each cited chunk number to its unique filename,
-            # then assign new numbers per unique file
-            old_to_new = {}
-            unique_files = []  # (new_num, filename)
-            file_to_new = {}
-            for old_num in cited_nums:
-                filename = Path(results[old_num - 1].file_path).name
-                if filename not in file_to_new:
-                    new_num = len(file_to_new) + 1
-                    file_to_new[filename] = new_num
-                    unique_files.append((new_num, filename))
-                old_to_new[old_num] = file_to_new[filename]
-
-            def replace_citation(match):
-                old_num = int(match.group(1))
-                if old_num in old_to_new:
-                    return f"[{old_to_new[old_num]}]"
-                return match.group(0)
-
-            answer = re.sub(r'\[(\d+)\]', replace_citation, answer)
+        # Group citation numbers by unique filename (same file may be cited multiple times)
+        file_to_nums: dict[str, list[int]] = {}
+        for num in cited_nums:
+            filename = Path(results[num - 1].file_path).name
+            file_to_nums.setdefault(filename, []).append(num)
 
         # Display references
         console.print("[bold]References:[/bold]")
-        if cited_nums:
-            for new_num, filename in unique_files:
-                console.print(f"  [cyan][{new_num}][/cyan] {filename}")
+        if file_to_nums:
+            for filename, nums in file_to_nums.items():
+                nums_str = "".join(f"[{n}]" for n in nums)
+                console.print(f"  [cyan]{nums_str}[/cyan] {filename}")
         else:
-            # Fallback: show all references deduplicated
-            seen = set()
+            # Fallback: LLM produced no inline citations — list all retrieved files
+            seen: set[str] = set()
             ref_num = 1
             for r in results:
                 filename = Path(r.file_path).name

@@ -8,7 +8,6 @@ import json
 import logging
 import re
 import sys
-import os
 from pathlib import Path
 
 import multiprocessing
@@ -85,7 +84,6 @@ def entrypoint(
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0, default: 0.15)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    api_base: str = typer.Option(None, "--api-base", "-a", help="API base URL (default: http://localhost:11434/v1)"),
 ) -> None:
     """PaperRAG - local RAG for academic PDFs."""
     if ctx.invoked_subcommand is None:
@@ -135,9 +133,6 @@ def entrypoint(
         if input_dir:
             cfg.input_dir = input_dir
         
-        if api_base:
-            cfg.llm.api_base = api_base
-
         if model:
             cfg.llm.model_name = model
 
@@ -467,11 +462,9 @@ def query(
     top_k: int = typer.Option(5, "--top-k", "-k"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    no_llm: bool = typer.Option(False, "--no-llm", help="Retrieval only, skip LLM"),
     input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (required)"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
-    api_base: str = typer.Option(None, "--api-base", help="API base URL (default: http://localhost:11434/v1)"),
 ) -> None:
     """Query the indexed papers."""
     from paperrag.retriever import Retriever
@@ -499,9 +492,6 @@ def query(
     if index_dir:
         cfg.index_dir = index_dir
 
-    if api_base:
-        cfg.llm.api_base = api_base
-
     if model:
         cfg.llm.model_name = model
 
@@ -526,35 +516,6 @@ def query(
         console.print("[yellow]No results found.[/yellow]")
         raise typer.Exit(0)
 
-    if no_llm:
-        # Display references only (no LLM answer, grouped by file)
-        console.print("\n[bold]References:[/bold]")
-        from collections import OrderedDict
-        from pathlib import Path as PathlibPath
-
-        # Group citation numbers by filename
-        file_groups = OrderedDict()
-        for i, r in enumerate(results, 1):
-            try:
-                rel_path = os.path.relpath(r.file_path)
-            except ValueError:
-                rel_path = r.file_path
-            filename = PathlibPath(rel_path).name
-
-            if filename not in file_groups:
-                file_groups[filename] = []
-            file_groups[filename].append(i)
-
-        # Display grouped references
-        for filename, citation_nums in file_groups.items():
-            if len(citation_nums) == 1:
-                console.print(f"  [cyan][{citation_nums[0]}][/cyan] {filename}")
-            else:
-                nums_str = ", ".join(f"[{n}]" for n in citation_nums)
-                console.print(f"  [cyan]{nums_str}[/cyan] {filename}")
-        console.print()
-        return
-
     import re
     import sys
     from paperrag.llm import stream_answer
@@ -577,42 +538,28 @@ def query(
         t_llm = time.perf_counter() - t1
         answer = full_answer.strip()
 
-        # Extract cited reference numbers from answer
+        # Extract cited reference numbers from the streamed answer (keep original numbers
+        # so they match what was already printed to the terminal).
         cited_nums = sorted(set(
             int(m) for m in re.findall(r'\[(\d+)\]', answer)
             if int(m) <= len(results)
         ))
 
-        if cited_nums:
-            # Map each cited chunk number to its unique filename,
-            # then assign new numbers per unique file
-            old_to_new = {}
-            unique_files = []  # (new_num, filename)
-            file_to_new = {}
-            for old_num in cited_nums:
-                filename = PathlibPath(results[old_num - 1].file_path).name
-                if filename not in file_to_new:
-                    new_num = len(file_to_new) + 1
-                    file_to_new[filename] = new_num
-                    unique_files.append((new_num, filename))
-                old_to_new[old_num] = file_to_new[filename]
-
-            def replace_citation(match):
-                old_num = int(match.group(1))
-                if old_num in old_to_new:
-                    return f"[{old_to_new[old_num]}]"
-                return match.group(0)
-
-            answer = re.sub(r'\[(\d+)\]', replace_citation, answer)
+        # Group citation numbers by unique filename (same file may be cited multiple times)
+        file_to_nums: dict[str, list[int]] = {}
+        for num in cited_nums:
+            filename = PathlibPath(results[num - 1].file_path).name
+            file_to_nums.setdefault(filename, []).append(num)
 
         # Display references
         console.print("\n[bold]References:[/bold]")
-        if cited_nums:
-            for new_num, filename in unique_files:
-                console.print(f"  [cyan][{new_num}][/cyan] {filename}")
+        if file_to_nums:
+            for filename, nums in file_to_nums.items():
+                nums_str = "".join(f"[{n}]" for n in nums)
+                console.print(f"  [cyan]{nums_str}[/cyan] {filename}")
         else:
-            # Fallback: show all references deduplicated
-            seen = set()
+            # Fallback: LLM produced no inline citations — list all retrieved files
+            seen: set[str] = set()
             ref_num = 1
             for r in results:
                 filename = PathlibPath(r.file_path).name

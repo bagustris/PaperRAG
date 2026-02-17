@@ -19,13 +19,13 @@ dependencies = [
     "psutil>=5.9",
     "pymupdf>=1.23",  # For PDF text detection
     "prompt-toolkit>=3.0",  # For REPL command history
+    "openai>=1.0,<2.0",
 ]
 
 [project.optional-dependencies]
 llm = [
     "transformers>=4.38",
     "accelerate>=0.27",
-    "openai>=1.0,<2.0",
 ]
 test = [
     "pytest>=8.0",

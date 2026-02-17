@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 def _default_input_dir() -> str:
@@ -144,27 +143,11 @@ class IndexingConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM configuration."""
 
+    model_config = {"extra": "ignore"}  # tolerate old snapshots with api_base/api_key
+
     model_name: str = "qwen3:1.7b"
     temperature: float = 0.0
     max_tokens: int = 512
-    api_base: str = "http://localhost:11434/v1"
-    api_key: str | None = None
-
-    @field_validator("api_base", mode="before")
-    @classmethod
-    def _coerce_api_base(cls, v: object) -> str:
-        """Accept None from old config snapshots, fall back to local Ollama default."""
-        if v is None:
-            return "http://localhost:11434/v1"
-        return str(v)
-
-    def resolve_api_key(self) -> str:
-        if self.api_key:
-            return self.api_key
-        env_key = os.getenv("OPENAI_API_KEY", "")
-        if env_key:
-            return env_key
-        return "not-needed"
 
 
 class PaperRAGConfig(BaseModel):

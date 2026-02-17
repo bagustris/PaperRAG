@@ -13,7 +13,7 @@ Default PDF directory: `/home/$USER/Documents/Mendeley Desktop/`
 - Section-aware chunking
 - Deterministic indexing with SHA256 hashing
 - FAISS vector store
-- Local (Ollama) or OpenAI-compatible LLM support
+- Local LLM via Ollama
 - Interactive REPL with command history
 - Fully offline-capable
 - Reproducible experiments
@@ -119,18 +119,9 @@ Query with local LLM (Ollama):
 
     paperrag query "what is speech chain?" -m qwen3:1.7b
 
-Query with OpenAI:
-
-    export OPENAI_API_KEY='your-key-here'
-    paperrag query "what is speech chain?"
-
 Query with similarity threshold:
 
     paperrag query "what is speech chain?" -m qwen3:1.7b --threshold 0.3
-
-Retrieval only (no LLM):
-
-    paperrag query "what is speech chain?" --no-llm
 
 **Note:** Each query reloads the index. For multiple questions, use REPL mode.
 
@@ -141,25 +132,18 @@ Retrieval only (no LLM):
 **Best practice - start REPL with LLM configured:**
 
 ```bash
-# With local Ollama (recommended for privacy & offline use)
+# With local Ollama
 paperrag -m qwen3:1.7b
-
-# With OpenAI (requires OPENAI_API_KEY env var)
-paperrag --model gpt-4 --api-base https://api.openai.com/v1
 
 # With custom index directory
 paperrag --index-dir /path/to/index -m qwen3:1.7b
 
 # With similarity threshold
 paperrag -m qwen3:1.7b --threshold 0.3
-
-# Without LLM configured (will work but show tip to enable LLM)
-paperrag
 ```
 
 **CLI Options for REPL:**
-- `--model, -m <name>` - Set LLM model (e.g., `qwen3:1.7b` for local, `gpt-4` for OpenAI)
-- `--api-base, -a <url>` - Custom API endpoint (implies OpenAI mode)
+- `--model, -m <name>` - Set LLM model (e.g., `qwen3:1.7b`)
 - `--index-dir, -i <path>` - Custom index directory
 - `--input-dir, -d <path>` - PDF directory
 - `--threshold, -t <float>` - Similarity score threshold (0.0-1.0)
@@ -205,7 +189,6 @@ paperrag
     topk <n>             Set top-k for retrieval (default: 5)
     threshold <n>        Set similarity threshold (0.0-1.0)
     temperature <n>      Set LLM temperature (0.0-2.0)
-    no-llm               Toggle LLM off/on (retrieval-only mode)
     model <name>         Set LLM model name
     config               Show current LLM configuration
     help                 Show help message
@@ -215,9 +198,9 @@ paperrag
 
 ## LLM Configuration
 
-**Option 1: Local LLM with Ollama (Recommended)**
+PaperRAG uses a local LLM via [Ollama](https://ollama.com).
 
-Install Ollama from https://ollama.com, then pull a model:
+Install Ollama, then pull a model:
 
     ollama pull qwen3:1.7b
 
@@ -225,27 +208,6 @@ Use with PaperRAG:
 
     paperrag -m qwen3:1.7b
     paperrag query "your question" -m qwen3:1.7b
-
-**Option 2: OpenAI API**
-
-Set your API key:
-
-    export OPENAI_API_KEY='sk-...'
-
-Use with PaperRAG (openai mode is default):
-
-    paperrag
-    paperrag query "your question"
-
-Or specify model:
-
-    paperrag --model gpt-4 --api-base https://api.openai.com/v1
-
-**Option 3: No LLM (Retrieval Only)**
-
-LLM is optional. Use `--no-llm` for retrieval-only mode:
-
-    paperrag query "your question" --no-llm
 
 ------------------------------------------------------------------------
 
@@ -262,7 +224,7 @@ paperrag/
     embedder.py      # Sentence-transformer embeddings
     vectorstore.py   # FAISS vector store
     retriever.py     # Retrieval + re-ranking
-    llm.py           # LLM integration (Ollama / OpenAI)
+    llm.py           # LLM integration (Ollama)
     parallel.py      # Parallel indexing with worker management
 ```
 

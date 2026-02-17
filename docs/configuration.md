@@ -8,8 +8,7 @@ Settings are applied in this order (later overrides earlier):
 
 1. **Defaults** -- Pydantic model defaults
 2. **Config snapshot** -- loaded from `<index-dir>/config_snapshot.json` when an existing index is opened
-3. **Environment variables** -- e.g. `OPENAI_API_KEY`
-4. **CLI options** -- highest priority
+3. **CLI options** -- highest priority
 
 ## Top-level: `PaperRAGConfig`
 
@@ -89,11 +88,3 @@ Each worker requires approximately 2 GB of RAM during peak Docling usage.
 | `model_name` | `str` | `qwen3:1.7b` | LLM model name |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `512` | Maximum response tokens |
-| `api_base` | `str` | `http://localhost:11434/v1` | API endpoint URL |
-| `api_key` | `str \| None` | `None` | API key (falls back to `OPENAI_API_KEY` env var) |
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | API key for OpenAI-compatible endpoints (used when `api_key` is not set) |
