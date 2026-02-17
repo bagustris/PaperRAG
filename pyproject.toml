@@ -30,6 +30,11 @@ llm = [
 test = [
     "pytest>=8.0",
 ]
+docs = [
+    "sphinx>=7.0",
+    "myst-parser>=2.0",
+    "furo",
+]
 
 [project.scripts]
 paperrag = "paperrag.cli:app"
