@@ -61,7 +61,7 @@ paperrag query QUESTION [OPTIONS]
 |--------|-------|-------------|
 | `--index-dir PATH` | `-i` | Index directory (required) |
 | `--input-dir PATH` | `-d` | PDF directory |
-| `--top-k N` | `-k` | Number of results (default: 5) |
+| `--top-k N` | `-k` | Number of results (default: 3) |
 | `--threshold FLOAT` | `-t` | Similarity score threshold (0.0-1.0) |
 | `--temperature FLOAT` | | LLM temperature (0.0-2.0) |
 | `--model NAME` | `-m` | LLM model name |
@@ -86,7 +86,7 @@ paperrag evaluate BENCHMARK_FILE [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--top-k N` | `-k` | Number of results (default: 5) |
+| `--top-k N` | `-k` | Number of results (default: 3) |
 | `--input-dir PATH` | `-d` | PDF directory |
 | `--index-dir PATH` | `-i` | Index directory |
 

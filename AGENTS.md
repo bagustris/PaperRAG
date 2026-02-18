@@ -1,4 +1,4 @@
-# AGENTS.md --- PaperRAG (Production-Grade v2)
+# AGENTS.md --- PaperRAG 
 
 ## 1. Project Overview
 
@@ -11,9 +11,15 @@ Default input directory:
 
 Must be configurable via CLI.
 
-Design Goals: - Fully local-first - Deterministic indexing - Scalable to
-20,000+ PDFs - Reproducible experiments - Modular architecture -
-Research-grade logging and evaluation hooks
+Design Goals:  
+- Fully local-first  
+- CPU first, GPU second  
+- Balance of speed and quality  
+- Deterministic indexing  
+- Scalable to 20,000+ PDFs  
+- Reproducible experiments  
+- Modular architecture  
+- Research-grade logging and evaluation hooks
 
 ------------------------------------------------------------------------
 
@@ -42,12 +48,25 @@ No pip or conda allowed.
 
 ## 3. Required Dependencies
 
-Core: - docling - sentence-transformers - faiss-cpu - torch - numpy -
-pydantic - typer - rich - tqdm - python-dotenv
+Core: 
+- docling  
+- sentence-transformers  
+- faiss-cpu  
+- torch  
+- numpy 
+- pydantic  
+- typer  
+- rich  
+- tqdm  
+- python-dotenv
 
-Optional (LLM): - transformers - accelerate - openai
+Optional (LLM):  
+- transformers   
+- accelerate  
+- openai
 
-Testing: - pytest
+Testing:  
+- pytest
 
 ------------------------------------------------------------------------
 
@@ -73,17 +92,26 @@ All steps must be modular and independently testable.
 
 Index directory structure:
 
-index/ ├── faiss.index ├── metadata.json ├── config_snapshot.json └──
-file_hashes.json
+.paperrag-index/  
+├── faiss.index   
+├── metadata.json  
+├── config_snapshot.json  
+└── file_hashes.json  
 
 ------------------------------------------------------------------------
 
 ## 6. PDF Parsing (DOCLING Required)
 
-Must extract: - Title - Authors - Sections (Abstract, Introduction,
-Methods, Results, Conclusion) - Full raw text fallback
+Must extract: 
+- Title 
+- Authors  
+- Sections (Abstract, Introduction Methods, Results, Conclusion)  
+- Full raw text fallback
 
-Must handle: - Corrupted files - Missing sections - Duplicate documents
+Must handle: 
+- Corrupted files 
+- Missing sections 
+- Duplicate documents
 
 ------------------------------------------------------------------------
 
@@ -94,8 +122,12 @@ Must handle: - Corrupted files - Missing sections - Duplicate documents
 -   Default chunk_overlap: 200
 -   Deterministic order guaranteed
 
-Chunks must include metadata: - paper_title - section_name - file_path -
-chunk_id - hash_id
+Chunks must include metadata:  
+- paper_title  
+- section_name  
+- file_path  
+- chunk_id  
+- hash_id
 
 ------------------------------------------------------------------------
 
@@ -105,15 +137,18 @@ Default model:
 
 sentence-transformers/all-MiniLM-L6-v2
 
-Requirements: - Batched encoding - GPU support if available - Embedding
-dimension validation - Deterministic seed control
+Requirements:  
+- Batched encoding  
+- GPU support if available  
+- Embedding dimension validation  
+- Deterministic seed control
 
 ------------------------------------------------------------------------
 
 ## 9. Retrieval
 
 -   FAISS IndexFlatIP preferred
--   Top-k retrieval (default k=5)
+-   Top-k retrieval (default k=3)
 -   Return similarity score
 -   Return metadata
 
@@ -160,7 +195,10 @@ Evaluate:
 
 ## 12. Logging
 
-Structured logging required. Levels: - INFO - WARNING - ERROR
+Structured logging required. Levels:  
+- INFO  
+- WARNING  
+- ERROR
 
 Indexing progress must use tqdm.
 

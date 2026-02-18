@@ -1,7 +1,11 @@
-"""Interactive REPL for PaperRAG."""
+"""Interactive REPL for PaperRAG.
+REPL: Read, Evaluate, Print, Loop!
+This mode is first class in PaperRAG
+"""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -10,7 +14,7 @@ from rich.console import Console
 from rich.table import Table
 
 from paperrag import __version__
-from paperrag.config import PaperRAGConfig
+from paperrag.config import PaperRAGConfig, load_rc
 from paperrag.parser import discover_pdfs
 
 console = Console()
@@ -25,6 +29,7 @@ HELP_TEXT = """\
   [cyan]max-tokens <n>[/cyan]   Set LLM max output tokens (default: 256)
   [cyan]model <name>[/cyan]     Set LLM model name
   [cyan]config[/cyan]           Show current configuration
+  [cyan]rc[/cyan]               Show loaded .paperragrc files and values
   [cyan]help[/cyan]             Show this help message
   [cyan]exit[/cyan] / [cyan]quit[/cyan]      Exit the REPL
 """
@@ -96,9 +101,12 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     console.print("[dim]Loading embedding model...\n[/dim]", end="")
     retriever = _ensure_retriever(None, cfg)
     if retriever is not None:
-        console.print(" [green]ready[/green]")
+        console.print("[green]Ready[/green]")
     else:
-        console.print(" [red]failed[/red]")
+        console.print("[red]Failed[/red]")
+
+    # Suppress INFO logs during interactive session to keep output clean.
+    logging.getLogger().setLevel(logging.WARNING)
 
     # Create prompt session with history support for arrow keys
     session = PromptSession(history=InMemoryHistory())
@@ -196,6 +204,21 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]\n")
             continue
 
+        if command == "rc":
+            global_path = Path.home() / ".paperragrc"
+            local_path = Path.cwd() / ".paperragrc"
+            console.print("\n[bold].paperragrc files:[/bold]")
+            for label, rc_path in [("Global", global_path), ("Local", local_path)]:
+                if rc_path.is_file():
+                    rc_data = load_rc(rc_path)
+                    console.print(f"  [green]{label}[/green]: {rc_path}")
+                    for k, v in rc_data.items():
+                        console.print(f"    {k} = [cyan]{v}[/cyan]")
+                else:
+                    console.print(f"  [dim]{label}[/dim]: {rc_path} [dim](not found)[/dim]")
+            console.print()
+            continue
+
         # Anything else is treated as a query
         retriever = _ensure_retriever(retriever, cfg)
         if retriever is None:
@@ -234,8 +257,17 @@ def _handle_query(
         console.print("[yellow]No results found.[/yellow]")
         return
 
+    # Show retrieved sources immediately so the user sees useful info
+    # while waiting for the LLM to generate.
+    console.print(f"\n[bold]Sources[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
+    seen_files: set[str] = set()
+    for i, r in enumerate(results):
+        filename = Path(r.file_path).name
+        if filename not in seen_files:
+            console.print(f"  [cyan][{i+1}][/cyan] {filename} [dim]({r.score:.2f})[/dim]")
+            seen_files.add(filename)
+
     try:
-        import re
         import sys
 
         from paperrag.llm import stream_answer
@@ -254,37 +286,6 @@ def _handle_query(
         sys.stdout.write("\n\n")
         sys.stdout.flush()
         t_llm = time.perf_counter() - t1
-        answer = full_answer.strip()
-
-        # Extract cited reference numbers from the streamed answer (keep original numbers
-        # so they match what was already printed to the terminal).
-        cited_nums = sorted(set(
-            int(m) for m in re.findall(r'\[(\d+)\]', answer)
-            if int(m) <= len(results)
-        ))
-
-        # Group citation numbers by unique filename (same file may be cited multiple times)
-        file_to_nums: dict[str, list[int]] = {}
-        for num in cited_nums:
-            filename = Path(results[num - 1].file_path).name
-            file_to_nums.setdefault(filename, []).append(num)
-
-        # Display references
-        console.print("[bold]References:[/bold]")
-        if file_to_nums:
-            for filename, nums in file_to_nums.items():
-                nums_str = "".join(f"[{n}]" for n in nums)
-                console.print(f"  [cyan]{nums_str}[/cyan] {filename}")
-        else:
-            # Fallback: LLM produced no inline citations — list all retrieved files
-            seen: set[str] = set()
-            ref_num = 1
-            for r in results:
-                filename = Path(r.file_path).name
-                if filename not in seen:
-                    console.print(f"  [cyan][{ref_num}][/cyan] {filename}")
-                    seen.add(filename)
-                    ref_num += 1
         t_total = time.perf_counter() - t0
         console.print(f"[dim]Retrieval: {t_retrieval:.2f}s | LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n")
 

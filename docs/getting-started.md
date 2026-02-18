@@ -90,7 +90,7 @@ Once inside the REPL, these commands are available:
 |---------|-------------|
 | `<any text>` | Query the indexed papers |
 | `index` | Re-index the PDF directory |
-| `topk <n>` | Set top-k for retrieval (default: 5) |
+| `topk <n>` | Set top-k for retrieval (default: 3) |
 | `threshold <n>` | Set similarity threshold (0.0-1.0) |
 | `temperature <n>` | Set LLM temperature (0.0-2.0) |
 | `model <name>` | Switch LLM model |

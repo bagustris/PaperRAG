@@ -23,7 +23,7 @@ try:
 except RuntimeError:
     pass
 
-from paperrag.config import PaperRAGConfig
+from paperrag.config import PaperRAGConfig, load_rc, apply_rc
 from paperrag import __version__
 
 app = typer.Typer(
@@ -74,6 +74,21 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _print_gpu_info() -> None:
+    """Detect and display GPU availability with an Ollama inference hint."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            console.print(f"[green]GPU detected:[/green] {gpu_name} — Ollama will use it automatically for faster inference")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            console.print("[green]GPU detected:[/green] Apple Silicon MPS — Ollama will use it automatically")
+        else:
+            console.print("[dim]Running on CPU, No GPU detected[/dim]")
+    except Exception:
+        pass
+
+
 
 @app.callback(invoke_without_command=True)
 def entrypoint(
@@ -85,41 +100,50 @@ def entrypoint(
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0, default: 0.15)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 512)"),
+    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
 ) -> None:
     """PaperRAG - local RAG for academic PDFs."""
     if ctx.invoked_subcommand is None:
         from paperrag.repl import start_repl
 
-        # REPL mode requires index_dir
-        if not index_dir:
+        cfg = PaperRAGConfig()
+
+        # Load .paperragrc: global first, then local overrides
+        global_rc = load_rc(Path.home() / ".paperragrc")
+        local_rc = load_rc(Path.cwd() / ".paperragrc")
+        apply_rc(cfg, global_rc)
+        apply_rc(cfg, local_rc)
+
+        # Resolve effective index_dir: CLI arg takes priority over RC
+        effective_index_dir = index_dir or cfg._index_dir
+
+        # REPL mode requires index_dir (from CLI or .paperragrc)
+        if not effective_index_dir:
             console.print("[red]Error: --index-dir is required for REPL mode[/red]")
             console.print("Usage: paperrag --index-dir <path> [options]")
+            console.print("[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]")
             raise typer.Exit(1)
-
-        cfg = PaperRAGConfig()
 
         # Auto-discover index location
         from paperrag.vectorstore import VectorStore
 
-        if index_dir:
-            index_path = Path(index_dir).resolve()
+        index_path = Path(effective_index_dir).resolve()
 
-            # Check if index_dir points directly to an index
-            if not (index_path / "version.json").exists():
-                # Try subdirectory convention
-                subdir_path = index_path / ".paperrag-index"
-                if (subdir_path / "version.json").exists():
-                    console.print(f"[dim]Found index at {subdir_path}[/dim]")
-                    index_path = subdir_path
-                else:
-                    console.print(f"[red]No index found at {index_path} or {subdir_path}[/red]")
-                    raise typer.Exit(1)
+        # Check if index_dir points directly to an index
+        if not (index_path / "version.json").exists():
+            # Try subdirectory convention
+            subdir_path = index_path / ".paperrag-index"
+            if (subdir_path / "version.json").exists():
+                console.print(f"[dim]Found index at {subdir_path}[/dim]")
+                index_path = subdir_path
+            else:
+                console.print(f"[red]No index found at {index_path} or {subdir_path}[/red]")
+                raise typer.Exit(1)
 
-            cfg.index_dir = str(index_path)
+        cfg.index_dir = str(index_path)
 
         # Load config snapshot from discovered index
-        if index_dir and VectorStore.exists(Path(cfg.index_dir)):
+        if VectorStore.exists(Path(cfg.index_dir)):
             snapshot_file = Path(cfg.index_dir) / "config_snapshot.json"
             if snapshot_file.exists():
                 try:
@@ -150,6 +174,7 @@ def entrypoint(
         if max_tokens is not None:
             cfg.llm.max_tokens = max_tokens
 
+        _print_gpu_info()
         start_repl(cfg)
 
 
@@ -227,6 +252,7 @@ def index(
     else:
         console.print(f"Found [green]{len(pdfs)}[/green] PDF(s) in {pdf_dir}")
 
+    _print_gpu_info()
     embedder = Embedder(cfg.embedder)
 
     # Load or create store
@@ -473,10 +499,10 @@ def index(
 @app.command()
 def query(
     question: str = typer.Argument(..., help="Your question"),
-    top_k: int = typer.Option(5, "--top-k", "-k"),
+    top_k: int = typer.Option(3, "--top-k", "-k"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 512)"),
+    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
     input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (required)"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
@@ -484,22 +510,32 @@ def query(
     """Query the indexed papers."""
     from paperrag.retriever import Retriever
 
-    # Query mode requires index_dir
-    if not index_dir:
+    cfg = PaperRAGConfig()
+
+    # Load .paperragrc: global first, then local overrides
+    global_rc = load_rc(Path.home() / ".paperragrc")
+    local_rc = load_rc(Path.cwd() / ".paperragrc")
+    apply_rc(cfg, global_rc)
+    apply_rc(cfg, local_rc)
+
+    # Resolve effective index_dir: CLI arg takes priority over RC
+    effective_index_dir = index_dir or cfg._index_dir
+
+    # Query mode requires index_dir (from CLI or .paperragrc)
+    if not effective_index_dir:
         console.print("[red]Error: --index-dir is required for query command[/red]")
         console.print("Usage: paperrag query <question> --index-dir <path> [options]")
+        console.print("[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]")
         raise typer.Exit(1)
 
-    cfg = PaperRAGConfig()
     if input_dir:
         cfg.input_dir = input_dir
-    elif index_dir:
+    elif effective_index_dir:
         # Try to load from index snapshot if input_dir not provided
-        snapshot_path = Path(index_dir) / "config_snapshot.json"
+        snapshot_path = Path(effective_index_dir) / "config_snapshot.json"
         if snapshot_path.exists():
             try:
                 loaded_cfg = PaperRAGConfig.load_snapshot(snapshot_path)
-                # Use loaded input_dir
                 cfg.input_dir = loaded_cfg.input_dir
             except Exception:
                 pass  # Fallback to default if load fails
@@ -534,10 +570,19 @@ def query(
         console.print("[yellow]No results found.[/yellow]")
         raise typer.Exit(0)
 
-    import re
     import sys
     from paperrag.llm import stream_answer
     from pathlib import Path as PathlibPath
+
+    # Show retrieved sources immediately so the user sees useful info
+    # while waiting for the LLM to generate.
+    console.print(f"\n[bold]Sources[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
+    seen_files: set[str] = set()
+    for i, r in enumerate(results):
+        filename = PathlibPath(r.file_path).name
+        if filename not in seen_files:
+            console.print(f"  [cyan][{i+1}][/cyan] {filename} [dim]({r.score:.2f})[/dim]")
+            seen_files.add(filename)
 
     context_chunks = [r.text for r in results]
     try:
@@ -554,39 +599,8 @@ def query(
         sys.stdout.write("\n")
         sys.stdout.flush()
         t_llm = time.perf_counter() - t1
-        answer = full_answer.strip()
-
-        # Extract cited reference numbers from the streamed answer (keep original numbers
-        # so they match what was already printed to the terminal).
-        cited_nums = sorted(set(
-            int(m) for m in re.findall(r'\[(\d+)\]', answer)
-            if int(m) <= len(results)
-        ))
-
-        # Group citation numbers by unique filename (same file may be cited multiple times)
-        file_to_nums: dict[str, list[int]] = {}
-        for num in cited_nums:
-            filename = PathlibPath(results[num - 1].file_path).name
-            file_to_nums.setdefault(filename, []).append(num)
-
-        # Display references
-        console.print("\n[bold]References:[/bold]")
-        if file_to_nums:
-            for filename, nums in file_to_nums.items():
-                nums_str = "".join(f"[{n}]" for n in nums)
-                console.print(f"  [cyan]{nums_str}[/cyan] {filename}")
-        else:
-            # Fallback: LLM produced no inline citations — list all retrieved files
-            seen: set[str] = set()
-            ref_num = 1
-            for r in results:
-                filename = PathlibPath(r.file_path).name
-                if filename not in seen:
-                    console.print(f"  [cyan][{ref_num}][/cyan] {filename}")
-                    seen.add(filename)
-                    ref_num += 1
         t_total = time.perf_counter() - t0
-        console.print(f"[dim]Retrieval: {t_retrieval:.2f}s | LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n")
+        console.print(f"\n[dim]Retrieval: {t_retrieval:.2f}s | LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n")
 
     except ImportError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
@@ -605,7 +619,7 @@ def query(
 @app.command()
 def evaluate(
     benchmark_file: str = typer.Argument(..., help="JSONL benchmark file"),
-    top_k: int = typer.Option(5, "--top-k", "-k"),
+    top_k: int = typer.Option(3, "--top-k", "-k"),
     input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: <input-dir>/.paperrag-index)"),
 ) -> None:

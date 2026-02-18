@@ -173,7 +173,7 @@ class VectorStore:
     # Search
     # ------------------------------------------------------------------
 
-    def search(self, query_vec: np.ndarray, top_k: int = 5) -> list[tuple[dict, float]]:
+    def search(self, query_vec: np.ndarray, top_k: int = 3) -> list[tuple[dict, float]]:
         """Return top-k (chunk_metadata, score) pairs."""
         if self.index.ntotal == 0:
             return []

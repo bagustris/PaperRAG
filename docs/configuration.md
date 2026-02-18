@@ -1,14 +1,56 @@
 # Configuration
 
-PaperRAG uses Pydantic models for configuration. Settings can be provided via CLI options, config snapshots (saved with the index), or environment variables.
+PaperRAG uses Pydantic models for configuration. Settings can be provided via CLI options, `.paperragrc` run control files, config snapshots (saved with the index), or code defaults.
 
 ## Config Hierarchy
 
 Settings are applied in this order (later overrides earlier):
 
 1. **Defaults** -- Pydantic model defaults
-2. **Config snapshot** -- loaded from `<index-dir>/config_snapshot.json` when an existing index is opened
-3. **CLI options** -- highest priority
+2. **Global `.paperragrc`** -- `~/.paperragrc`
+3. **Local `.paperragrc`** -- `.paperragrc` in current directory
+4. **Config snapshot** -- loaded from `<index-dir>/config_snapshot.json` when an existing index is opened
+5. **CLI options** -- highest priority
+
+## `.paperragrc` Run Control File
+
+Create a `.paperragrc` file to set persistent defaults so you don't have to pass CLI arguments every time. The file uses [TOML](https://toml.io) format (parsed with Python's built-in `tomllib` -- no extra dependencies).
+
+**Scopes:**
+
+- **Global**: `~/.paperragrc` -- applies to all PaperRAG invocations
+- **Local**: `.paperragrc` in the current working directory -- project-specific overrides
+
+Local values override global values. CLI arguments override both.
+
+**Example `~/.paperragrc`:**
+
+```toml
+# PaperRAG defaults
+model = "qwen2.5:1.5b"
+topk = 3
+max-tokens = 256
+temperature = 0.0
+threshold = 0.1
+index-dir = "/home/user/papers/.paperrag-index"
+input-dir = "/home/user/papers"
+```
+
+**Supported keys:**
+
+| RC Key | Maps To | Type |
+|--------|---------|------|
+| `model` | LLM model name | `str` |
+| `topk` | Number of chunks to retrieve | `int` |
+| `max-tokens` | LLM max output tokens | `int` |
+| `temperature` | LLM temperature | `float` |
+| `threshold` | Minimum similarity score | `float` |
+| `index-dir` | Index directory path | `str` |
+| `input-dir` | PDF input directory path | `str` |
+
+Unknown keys produce a warning but do not cause errors. Invalid TOML files are skipped with a warning.
+
+Use `rc` in the REPL to see which RC files are loaded and their values.
 
 ## Top-level: `PaperRAGConfig`
 
@@ -53,8 +95,8 @@ Settings are applied in this order (later overrides earlier):
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `top_k` | `int` | `5` | Number of results to return |
-| `score_threshold` | `float` | `0.15` | Minimum similarity score (0.0 = no filtering) |
+| `top_k` | `int` | `3` | Number of results to return |
+| `score_threshold` | `float` | `0.1` | Minimum similarity score (0.0 = no filtering) |
 | `use_mmr` | `bool` | `False` | Use Maximal Marginal Relevance for diversity |
 | `mmr_lambda` | `float` | `0.5` | MMR lambda (0 = max diversity, 1 = max relevance) |
 | `max_results_per_paper` | `int` | `2` | Maximum results from the same paper |
@@ -87,4 +129,4 @@ Each worker requires approximately 2 GB of RAM during peak Docling usage.
 |-------|------|---------|-------------|
 | `model_name` | `str` | `qwen3:1.7b` | LLM model name |
 | `temperature` | `float` | `0.0` | Sampling temperature |
-| `max_tokens` | `int` | `512` | Maximum response tokens |
+| `max_tokens` | `int` | `256` | Maximum response tokens |

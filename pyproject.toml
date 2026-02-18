@@ -1,6 +1,6 @@
 [project]
 name = "paperrag"
-version = "0.2.0"
+version = "0.3.1"
 description = "Local RAG for academic PDFs"
 authors = [{name = "PaperRAG Team"}]
 readme = "README.md"
@@ -23,6 +23,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gpu = [
+    "torch",  # reinstalled from default PyPI index (CUDA-bundled)
+]
 llm = [
     "transformers>=4.38",
     "accelerate>=0.27",
@@ -46,3 +49,18 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["paperrag"]
 
+# CPU-only torch is the default (avoids ~2.5GB CUDA download).
+# Install with GPU/CUDA support: uv pip install -e ".[gpu]"
+#
+# How it works:
+#   - Default (no extras): torch pulled from pytorch-cpu index (CPU-only, ~200MB)
+#   - With [gpu] extra: torch pulled from PyPI (CUDA-bundled, ~2.5GB)
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "extra != 'gpu'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

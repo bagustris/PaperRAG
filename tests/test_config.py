@@ -11,7 +11,7 @@ def test_default_config():
     assert cfg.chunker.chunk_size == 1000
     assert cfg.chunker.chunk_overlap == 200
     assert cfg.embedder.model_name == "sentence-transformers/all-MiniLM-L6-v2"
-    assert cfg.retriever.top_k == 3
+    assert cfg.retriever.top_k == 2
     assert cfg.llm.temperature == 0.0
 
 

@@ -3,10 +3,58 @@
 from __future__ import annotations
 
 import json
+import logging
+import tomllib
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+_rc_logger = logging.getLogger(__name__)
+
+# Mapping from .paperragrc keys to config field paths
+_RC_KEY_MAP: dict[str, tuple[str, type]] = {
+    "model": ("llm.model_name", str),
+    "topk": ("retriever.top_k", int),
+    "max-tokens": ("llm.max_tokens", int),
+    "temperature": ("llm.temperature", float),
+    "threshold": ("retriever.score_threshold", float),
+    "index-dir": ("index_dir", str),
+    "input-dir": ("input_dir", str),
+}
+
+
+def load_rc(path: Path) -> dict:
+    """Load a .paperragrc TOML file, returning a flat dict of overrides."""
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except Exception as exc:
+        _rc_logger.warning("Failed to parse %s: %s", path, exc)
+        return {}
+
+
+def apply_rc(cfg: "PaperRAGConfig", overrides: dict) -> None:
+    """Apply .paperragrc overrides to a PaperRAGConfig instance."""
+    for key, value in overrides.items():
+        if key not in _RC_KEY_MAP:
+            _rc_logger.warning("Unknown .paperragrc key: %s", key)
+            continue
+        field_path, expected_type = _RC_KEY_MAP[key]
+        try:
+            casted = expected_type(value)
+        except (ValueError, TypeError) as exc:
+            _rc_logger.warning("Invalid value for %s in .paperragrc: %s", key, exc)
+            continue
+
+        parts = field_path.split(".")
+        if len(parts) == 2:
+            sub, attr = parts
+            setattr(getattr(cfg, sub), attr, casted)
+        else:
+            setattr(cfg, parts[0], casted)
 
 
 def _default_input_dir() -> str:
@@ -48,7 +96,7 @@ class EmbedderConfig(BaseModel):
 class RetrieverConfig(BaseModel):
     """Retrieval configuration."""
 
-    top_k: int = Field(default=1, ge=1)
+    top_k: int = Field(default=2, ge=1)
     score_threshold: float = Field(
         default=0.1,
         ge=0.0,
@@ -147,7 +195,7 @@ class LLMConfig(BaseModel):
 
     model_name: str = "qwen2.5:1.5b"
     temperature: float = 0.0
-    max_tokens: int = 512
+    max_tokens: int = 128
 
 
 class PaperRAGConfig(BaseModel):

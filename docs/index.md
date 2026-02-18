@@ -31,6 +31,7 @@ paperrag --index-dir ~/papers -m qwen3:1.7b
 getting-started
 cli
 configuration
+usage  
 architecture
 api
 ```
