@@ -2,7 +2,7 @@
 
 Local-first Retrieval-Augmented Generation (RAG) system for querying academic PDF collections.
 
-Demo: https://asciinema.org/a/788900
+Demo: https://asciinema.org/a/789531
 
 ------------------------------------------------------------------------
 
@@ -57,10 +57,20 @@ With GPU/CUDA support (NVIDIA GPU):
 
 #### Example  
 
-```bash
+```bash 
 $ paperrag index -d test_pdfs  
 $ paperrag -i test_pdfs -m qwen2.5:1.5b  
 paperag> What is speech chain?  
+
+Sources (0.05s)
+  [1] Rabiner, Schafer - 2007 - Introduction to digital speech processing.pdf (0.68)
+  [2] Tjandra, Sakti, Nakamura - 2018 - Listening while speaking Speech chain by deep learning.pdf (0.66)
+
+Answer:
+The speech chain, introduced by Denes et al. in their classic introduction to speech science (Fig. 1), describes the basic mechanism involved in speech communication when a spoken message travels from the speaker's mind to the listener's mind. It consists of a speech production process where words are generated and speech sound waves are produced, transmitted through a medium like air, and then perceived by the listener's auditory system to understand what was said (Fig. 1).
+
+Retrieval: 0.05s | LLM: 8.65s | Total: 8.69s
+
 ```
 ------------------------------------------------------------------------
 

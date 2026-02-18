@@ -1,1 +1,167 @@
 docs/_build/
+
+__pycache__/ 
+*.egg-info/
+test_index/
+test_pdfs/
+.paperrag-index/
+*.gitignore?
+uv.lock 
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.virtualenv/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PaperRAG specific
+# Index files and caches (users generate their own)
+.paper_rag/
+index/
+*.index
+*.faiss
+*.pkl
+*.joblib
+metadata.json
+file_hashes.json
+config_snapshot.json
+version.json
+
+# Test data
+test_pdfs/
+sample_pdfs/
+
+# User's PDF directories (comment out if you want to track PDFs)
+# /Documents/Mendeley Desktop/
+# *.pdf
+
+# Project-specific files
+opencode.json
+prompt.md
+bak/
+
+# Logs
+*.log
+logs/
+failed_pdfs.log
+
+# Environment variables
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Claude Code plans (optional - comment out if you want to track them)
+# .claude/
+
+# Large model files (if any)
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Backup files
+*~
+*.orig
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# Data directories (optional - uncomment if you have large datasets)
+# data/
+# papers/
+# Documents/
