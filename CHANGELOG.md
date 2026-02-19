@@ -8,13 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [XX.YY.ZZ: Major.Minor.Patch] - YYYY-MM-DD  
 
 ## [0.3.1] - 2026-02-18  
-- Addes RC support (.paperragrc)
-- Added sources, removed references 
+- Added Sources, removed References in REPL 
 - Auto-detect GPU 
 
 ## [0.3.0] - 2026-02-17  
 - Added documentation (`docs`)
-  
+- Added RC support (.paperragrc) 
+
 ## [0.2.0] - 2026-02-16  
 - Added support for files, in addition to folders  
 
