@@ -196,6 +196,16 @@ class LLMConfig(BaseModel):
     model_name: str = "qwen2.5:1.5b"
     temperature: float = 0.0
     max_tokens: int = 128
+    n_ctx: int = Field(
+        default=2048,
+        ge=512,
+        description="Context window size for llama.cpp GGUF models",
+    )
+    n_gpu_layers: int = Field(
+        default=0,
+        ge=0,
+        description="Number of layers to offload to GPU for llama.cpp GGUF models (0 = CPU only)",
+    )
 
 
 class PaperRAGConfig(BaseModel):

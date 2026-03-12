@@ -30,6 +30,9 @@ llm = [
     "transformers>=4.38",
     "accelerate>=0.27",
 ]
+llama = [
+    "llama-cpp-python>=0.2",
+]
 test = [
     "pytest>=8.0",
 ]

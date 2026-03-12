@@ -1,8 +1,9 @@
-"""LLM module for local Ollama inference via OpenAI-compatible API."""
+"""LLM module for local inference via Ollama (OpenAI-compatible API) or llama.cpp (GGUF files)."""
 
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterator
 
 from paperrag.config import LLMConfig
@@ -12,6 +13,9 @@ logger = logging.getLogger(__name__)
 # Module-level client cache to avoid reconnection overhead per query
 _client_cache: object | None = None
 _model_checked: set[str] = set()
+
+# Cache for loaded llama-cpp-python Llama instances (keyed by (model_path, n_ctx, n_gpu_layers))
+_llama_cache: dict[tuple, object] = {}
 
 SYSTEM_PROMPT = (
     "You are a helpful research assistant. "
@@ -78,19 +82,69 @@ def _check_ollama_model_available(model_name: str) -> bool:
         return True
 
 
+def _is_gguf_model(model_name: str) -> bool:
+    """Return True if *model_name* refers to a local GGUF file (ends with .gguf)."""
+    return model_name.lower().endswith(".gguf")
+
+
+def _get_llama_model(model_path: str, n_ctx: int = 2048, n_gpu_layers: int = 0) -> object:
+    """Load and cache a llama-cpp-python ``Llama`` instance for *model_path*.
+
+    The instance is keyed by ``(model_path, n_ctx, n_gpu_layers)`` so that
+    changing context size or GPU offload creates a fresh instance.
+
+    Raises ``ImportError`` if llama-cpp-python is not installed.
+    Raises ``FileNotFoundError`` if the GGUF file does not exist.
+    """
+    try:
+        from llama_cpp import Llama  # type: ignore[import]
+    except ImportError as exc:
+        raise ImportError(
+            "The 'llama-cpp-python' package is required for GGUF models. "
+            "Install with: uv pip install llama-cpp-python"
+        ) from exc
+
+    cache_key = (model_path, n_ctx, n_gpu_layers)
+    if cache_key not in _llama_cache:
+        if not os.path.isfile(model_path):
+            raise FileNotFoundError(f"GGUF model file not found: {model_path}")
+        logger.info("Loading GGUF model from %s (n_ctx=%d, n_gpu_layers=%d)", model_path, n_ctx, n_gpu_layers)
+        _llama_cache[cache_key] = Llama(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            verbose=False,
+        )
+    return _llama_cache[cache_key]
+
+
+def _build_messages(question: str, context_chunks: list[str], model_name: str) -> list[dict]:
+    """Build the chat messages list from question, context chunks and model name."""
+    user_prompt = _build_prompt(question, context_chunks)
+
+    # For Qwen3 models, append /no_think to disable the slow "thinking" mode.
+    # Thinking mode generates a long internal reasoning chain before answering,
+    # which is unnecessary for RAG Q&A and adds ~30-50s of latency.
+    model_lower = model_name.lower()
+    if "qwen3" in model_lower or "qwen-3" in model_lower:
+        user_prompt += " /no_think"
+
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
 def _prepare(
     question: str,
     context_chunks: list[str],
     config: LLMConfig,
 ) -> tuple:
-    """Shared setup: build prompt, get/cache client, return (client, messages).
-
-    Raises ValueError if context is empty.
-    """
+    """Ollama-specific setup: build messages, get/cache OpenAI client, return (client, messages)."""
     global _client_cache
     from openai import OpenAI
 
-    user_prompt = _build_prompt(question, context_chunks)
+    messages = _build_messages(question, context_chunks, config.model_name)
 
     if _client_cache is not None:
         client = _client_cache
@@ -109,19 +163,7 @@ def _prepare(
             )
         _model_checked.add(config.model_name)
 
-    logger.info("Calling LLM (model=%s, temp=%.2f)", config.model_name, config.temperature)
-
-    # For Qwen3 models, append /no_think to disable the slow "thinking" mode.
-    # Thinking mode generates a long internal reasoning chain before answering,
-    # which is unnecessary for RAG Q&A and adds ~30-50s of latency.
-    model_lower = config.model_name.lower()
-    if "qwen3" in model_lower or "qwen-3" in model_lower:
-        user_prompt += " /no_think"
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
+    logger.info("Calling Ollama LLM (model=%s, temp=%.2f)", config.model_name, config.temperature)
     return client, messages
 
 
@@ -130,11 +172,26 @@ def generate_answer(
     context_chunks: list[str],
     config: LLMConfig | None = None,
 ) -> str:
-    """Generate an answer using the configured LLM backend (blocking)."""
+    """Generate an answer using the configured LLM backend (blocking).
+
+    Uses llama.cpp when *config.model_name* ends with ``.gguf``;
+    otherwise delegates to Ollama via the OpenAI-compatible API.
+    """
     config = config or LLMConfig()
 
     if not context_chunks:
         return "No context available to answer the question."
+
+    if _is_gguf_model(config.model_name):
+        llm = _get_llama_model(config.model_name, config.n_ctx, config.n_gpu_layers)
+        messages = _build_messages(question, context_chunks, config.model_name)
+        logger.info("Calling llama.cpp (model=%s, temp=%.2f)", config.model_name, config.temperature)
+        response = llm.create_chat_completion(  # type: ignore[union-attr]
+            messages=messages,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+        )
+        return (response["choices"][0]["message"]["content"] or "").strip()
 
     try:
         client, messages = _prepare(question, context_chunks, config)
@@ -160,6 +217,9 @@ def stream_answer(
 ) -> Iterator[str]:
     """Yield text chunks as they arrive from the LLM (streaming).
 
+    Uses llama.cpp when *config.model_name* ends with ``.gguf``;
+    otherwise delegates to Ollama via the OpenAI-compatible API.
+
     Usage::
 
         for chunk in stream_answer(question, chunks, cfg.llm):
@@ -170,6 +230,26 @@ def stream_answer(
 
     if not context_chunks:
         yield "No context available to answer the question."
+        return
+
+    if _is_gguf_model(config.model_name):
+        llm = _get_llama_model(config.model_name, config.n_ctx, config.n_gpu_layers)
+        messages = _build_messages(question, context_chunks, config.model_name)
+        logger.info(
+            "Calling llama.cpp streaming (model=%s, temp=%.2f)",
+            config.model_name,
+            config.temperature,
+        )
+        response = llm.create_chat_completion(  # type: ignore[union-attr]
+            messages=messages,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            stream=True,
+        )
+        for chunk in response:
+            delta = chunk["choices"][0]["delta"].get("content", "")
+            if delta:
+                yield delta
         return
 
     try:
@@ -199,6 +279,14 @@ def describe_llm_error(exc: Exception, model_name: str) -> tuple[str, str | None
     The hint is non-None when there's a concrete remediation action.
     """
     msg = str(exc)
+
+    if _is_gguf_model(model_name):
+        if isinstance(exc, FileNotFoundError):
+            return (str(exc), None)
+        if isinstance(exc, ImportError):
+            return (msg, "uv pip install llama-cpp-python")
+        return (f"llama.cpp error for '{model_name}': {msg}", None)
+
     try:
         from openai import APIStatusError
         if isinstance(exc, APIStatusError) and exc.status_code == 500:
