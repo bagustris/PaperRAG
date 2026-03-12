@@ -31,7 +31,7 @@ llm = [
     "accelerate>=0.27",
 ]
 llama = [
-    "llama-cpp-python>=0.2",
+    "huggingface-hub>=0.20",  # For downloading GGUF models from HuggingFace
 ]
 test = [
     "pytest>=8.0",

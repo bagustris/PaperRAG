@@ -1,21 +1,49 @@
-"""LLM module for local inference via Ollama (OpenAI-compatible API) or llama.cpp (GGUF files)."""
+"""LLM module for local inference via Ollama or llama.cpp (GGUF / HuggingFace models).
+
+Backend selection rules
+-----------------------
+* Local ``*.gguf`` file path   → **llama-server** (from ``brew install llama-cpp``)
+* HuggingFace repo ID          → download GGUF + **llama-server**
+  (e.g. ``Qwen/Qwen3-1.7B-GGUF``)
+* All other names              → **Ollama** (unchanged)
+
+Example usage
+-------------
+::
+
+    paperrag query "What is X?" --model qwen2.5:1.5b         # Ollama
+    paperrag query "What is X?" --model Qwen/Qwen3-1.7B-GGUF # HF download + llama-server
+    paperrag query "What is X?" --model /path/to/model.gguf  # local GGUF + llama-server
+"""
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
 from collections.abc import Iterator
 
 from paperrag.config import LLMConfig
 
 logger = logging.getLogger(__name__)
 
-# Module-level client cache to avoid reconnection overhead per query
+# ---------------------------------------------------------------------------
+# Module-level caches
+# ---------------------------------------------------------------------------
+
+# Ollama OpenAI client cache
 _client_cache: object | None = None
 _model_checked: set[str] = set()
 
-# Cache for loaded llama-cpp-python Llama instances (keyed by (model_path, n_ctx, n_gpu_layers))
-_llama_cache: dict[tuple, object] = {}
+# llama-server process and client caches (keyed by (model_path, n_ctx, n_gpu_layers))
+_llama_server_procs: dict[tuple, subprocess.Popen] = {}
+_llama_server_clients: dict[tuple, object] = {}
 
 SYSTEM_PROMPT = (
     "You are a helpful research assistant. "
@@ -47,6 +75,44 @@ def _build_prompt(question: str, context_chunks: list[str]) -> str:
 
 _OLLAMA_BASE_URL = "http://localhost:11434"
 _OLLAMA_API_URL = f"{_OLLAMA_BASE_URL}/v1"
+
+
+# ---------------------------------------------------------------------------
+# Backend detection
+# ---------------------------------------------------------------------------
+
+
+def _is_gguf_model(model_name: str) -> bool:
+    """Return True if *model_name* is a local path to a GGUF file (ends with ``.gguf``)."""
+    return model_name.lower().endswith(".gguf")
+
+
+def _is_hf_model(model_name: str) -> bool:
+    """Return True if *model_name* is a HuggingFace repo ID (e.g. ``Qwen/Qwen3-1.7B-GGUF``).
+
+    HF repo IDs have the form ``owner/repo`` and do not start with ``/``, ``./``, or ``~``.
+    """
+    if model_name.startswith(("/", "./", "~")):
+        return False
+    parts = model_name.split("/")
+    return len(parts) == 2 and all(parts)
+
+
+def _is_llama_backend(model_name: str) -> bool:
+    """Return True if this model should use the llama.cpp (``llama-server``) backend.
+
+    Dispatch rules:
+
+    * Local ``.gguf`` file path   → **llama-server**
+    * HuggingFace repo ID (``org/repo``) → download GGUF + **llama-server**
+    * All other names (e.g. ``qwen2.5:1.5b``) → **Ollama**
+    """
+    return _is_gguf_model(model_name) or _is_hf_model(model_name)
+
+
+# ---------------------------------------------------------------------------
+# Ollama helpers
+# ---------------------------------------------------------------------------
 
 
 def _check_ollama_model_available(model_name: str) -> bool:
@@ -82,44 +148,217 @@ def _check_ollama_model_available(model_name: str) -> bool:
         return True
 
 
-def _is_gguf_model(model_name: str) -> bool:
-    """Return True if *model_name* refers to a local GGUF file (ends with .gguf)."""
-    return model_name.lower().endswith(".gguf")
+# ---------------------------------------------------------------------------
+# HuggingFace model download
+# ---------------------------------------------------------------------------
 
 
-def _get_llama_model(model_path: str, n_ctx: int = 2048, n_gpu_layers: int = 0) -> object:
-    """Load and cache a llama-cpp-python ``Llama`` instance for *model_path*.
+def _download_hf_gguf(repo_id: str) -> str:
+    """Download a GGUF file from *repo_id* on HuggingFace Hub.
 
-    The instance is keyed by ``(model_path, n_ctx, n_gpu_layers)`` so that
-    changing context size or GPU offload creates a fresh instance.
+    Prefers Q4_K_M quantization; falls back to the first ``.gguf`` file found.
+    Models are cached in HuggingFace's default cache (``~/.cache/huggingface/hub/``),
+    so re-runs will reuse the download without hitting the network again.
 
-    Raises ``ImportError`` if llama-cpp-python is not installed.
-    Raises ``FileNotFoundError`` if the GGUF file does not exist.
+    Raises ``ImportError`` if ``huggingface-hub`` is not installed.
+    Raises ``ValueError`` if no GGUF files are found in the repository.
+    Raises ``RuntimeError`` if the repository cannot be listed.
     """
     try:
-        from llama_cpp import Llama  # type: ignore[import]
+        from huggingface_hub import hf_hub_download, list_repo_files  # type: ignore[import]
     except ImportError as exc:
         raise ImportError(
-            "The 'llama-cpp-python' package is required for GGUF models. "
-            "Install with: uv pip install llama-cpp-python"
+            "huggingface-hub is required to download HuggingFace models. "
+            "Install with: uv pip install huggingface-hub"
         ) from exc
 
+    logger.info("Listing GGUF files in %s ...", repo_id)
+    try:
+        all_files = list(list_repo_files(repo_id))
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to list files in HuggingFace repo '{repo_id}': {exc}"
+        ) from exc
+
+    gguf_files = [f for f in all_files if f.lower().endswith(".gguf")]
+    if not gguf_files:
+        raise ValueError(f"No GGUF files found in HuggingFace repo: {repo_id}")
+
+    # Prefer Q4_K_M (good quality/speed tradeoff), then Q4_0, then first available
+    chosen = None
+    for pattern in ("Q4_K_M", "q4_k_m", "Q4_0", "q4_0"):
+        matches = [f for f in gguf_files if pattern in f]
+        if matches:
+            chosen = matches[0]
+            break
+    if chosen is None:
+        chosen = gguf_files[0]
+
+    print(
+        f"Downloading '{chosen}' from {repo_id} "
+        "(cached in ~/.cache/huggingface/hub/) ...",
+        file=sys.stderr,
+        flush=True,
+    )
+    logger.info("Downloading '%s' from %s ...", chosen, repo_id)
+    local_path = hf_hub_download(repo_id=repo_id, filename=chosen)
+    logger.info("Model ready at %s", local_path)
+    return local_path
+
+
+def _resolve_model_path(model_name: str) -> str:
+    """Resolve a model name to a local GGUF file path.
+
+    * Local ``.gguf`` path → validated and returned as-is.
+    * HuggingFace repo ID → GGUF downloaded via ``huggingface-hub`` and path returned.
+    """
+    if _is_gguf_model(model_name):
+        if not os.path.isfile(model_name):
+            raise FileNotFoundError(f"GGUF model file not found: {model_name}")
+        return model_name
+
+    if _is_hf_model(model_name):
+        return _download_hf_gguf(model_name)
+
+    raise ValueError(f"Cannot resolve model path for: {model_name!r}")
+
+
+# ---------------------------------------------------------------------------
+# llama-server lifecycle
+# ---------------------------------------------------------------------------
+
+
+def _find_llama_server_binary() -> str:
+    """Return the path to the ``llama-server`` binary.
+
+    Checks ``PATH`` first, then common Homebrew install locations.
+
+    Raises ``FileNotFoundError`` if not found with an actionable install hint.
+    """
+    if bin_path := shutil.which("llama-server"):
+        return bin_path
+
+    for candidate in (
+        "/opt/homebrew/bin/llama-server",            # Homebrew on Apple Silicon
+        "/usr/local/bin/llama-server",               # Homebrew on Intel Mac
+        "/home/linuxbrew/.linuxbrew/bin/llama-server",  # Linuxbrew
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+
+    raise FileNotFoundError(
+        "llama-server not found.\n"
+        "Install with:  brew install llama-cpp\n"
+        "See also: https://github.com/ggerganov/llama.cpp"
+    )
+
+
+def _find_free_port() -> int:
+    """Return a free TCP port on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return s.getsockname()[1]
+
+
+def _wait_for_llama_server(port: int, timeout: float = 120.0) -> bool:
+    """Poll ``http://localhost:{port}/health`` until the server is ready."""
+    import urllib.request
+
+    url = f"http://localhost:{port}/health"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2):
+                return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -> object:
+    """Return a cached OpenAI client connected to a running ``llama-server``.
+
+    Starts a new ``llama-server`` process on a free port if none is cached for
+    the given ``(model_path, n_ctx, n_gpu_layers)`` combination, or if the
+    previously started process has exited unexpectedly.
+
+    The server process is registered with :func:`atexit` and terminated when
+    the Python interpreter exits.
+
+    Install ``llama-server`` with: ``brew install llama-cpp``
+    """
+    from openai import OpenAI
+
     cache_key = (model_path, n_ctx, n_gpu_layers)
-    if cache_key not in _llama_cache:
-        if not os.path.isfile(model_path):
-            raise FileNotFoundError(f"GGUF model file not found: {model_path}")
-        logger.info("Loading GGUF model from %s (n_ctx=%d, n_gpu_layers=%d)", model_path, n_ctx, n_gpu_layers)
-        _llama_cache[cache_key] = Llama(
-            model_path=model_path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            verbose=False,
+
+    # Re-use existing server if still alive
+    if cache_key in _llama_server_clients:
+        proc = _llama_server_procs.get(cache_key)
+        if proc is None or proc.poll() is None:  # no proc tracked, or still running
+            return _llama_server_clients[cache_key]
+        # Process died — remove stale entries and fall through to restart
+        logger.warning("llama-server process exited unexpectedly; restarting ...")
+        del _llama_server_clients[cache_key]
+        _llama_server_procs.pop(cache_key, None)
+
+    llama_server = _find_llama_server_binary()
+    port = _find_free_port()
+
+    cmd = [
+        llama_server,
+        "--model", model_path,
+        "--port", str(port),
+        "--ctx-size", str(n_ctx),
+        "--n-gpu-layers", str(n_gpu_layers),
+        "--parallel", "1",
+    ]
+
+    model_label = os.path.basename(model_path)
+    log_path = os.path.join(
+        tempfile.gettempdir(), f"paperrag-llama-server-{port}.log"
+    )
+    print(
+        f"Starting llama-server for '{model_label}' on port {port} "
+        "(first query may be slow while the model loads) ...",
+        file=sys.stderr,
+        flush=True,
+    )
+    logger.info(
+        "llama-server cmd: %s  (stderr → %s)", " ".join(cmd), log_path
+    )
+
+    with open(log_path, "w") as log_fh:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=log_fh
         )
-    return _llama_cache[cache_key]
+    atexit.register(proc.terminate)
+    _llama_server_procs[cache_key] = proc
+
+    _server_timeout = 120.0
+    if not _wait_for_llama_server(port, timeout=_server_timeout):
+        proc.terminate()
+        raise RuntimeError(
+            f"llama-server failed to start on port {port} within "
+            f"{int(_server_timeout)}s. "
+            f"Check server log for details: {log_path}\n"
+            "Also verify the model file is valid and llama-server is installed "
+            "(brew install llama-cpp)."
+        )
+
+    logger.info("llama-server ready on port %d", port)
+    client = OpenAI(api_key="not-needed", base_url=f"http://localhost:{port}/v1")
+    _llama_server_clients[cache_key] = client
+    return client
+
+
+# ---------------------------------------------------------------------------
+# Shared message builder
+# ---------------------------------------------------------------------------
 
 
 def _build_messages(question: str, context_chunks: list[str], model_name: str) -> list[dict]:
-    """Build the chat messages list from question, context chunks and model name."""
+    """Build the chat messages list from question, context chunks, and model name."""
     user_prompt = _build_prompt(question, context_chunks)
 
     # For Qwen3 models, append /no_think to disable the slow "thinking" mode.
@@ -167,6 +406,11 @@ def _prepare(
     return client, messages
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 def generate_answer(
     question: str,
     context_chunks: list[str],
@@ -174,24 +418,42 @@ def generate_answer(
 ) -> str:
     """Generate an answer using the configured LLM backend (blocking).
 
-    Uses llama.cpp when *config.model_name* ends with ``.gguf``;
-    otherwise delegates to Ollama via the OpenAI-compatible API.
+    Backend selection:
+
+    * HuggingFace repo IDs (``org/repo``) and local ``.gguf`` file paths use
+      **llama.cpp** via ``llama-server`` (install: ``brew install llama-cpp``).
+    * All other model names delegate to **Ollama**.
+
+    Examples::
+
+        # Ollama (unchanged)
+        paperrag query "What is X?" --model qwen2.5:1.5b
+
+        # llama.cpp — download Qwen3 GGUF from HuggingFace automatically
+        paperrag query "What is X?" --model Qwen/Qwen3-1.7B-GGUF
+
+        # llama.cpp — use a local GGUF file
+        paperrag query "What is X?" --model /path/to/model.gguf
     """
     config = config or LLMConfig()
 
     if not context_chunks:
         return "No context available to answer the question."
 
-    if _is_gguf_model(config.model_name):
-        llm = _get_llama_model(config.model_name, config.n_ctx, config.n_gpu_layers)
+    if _is_llama_backend(config.model_name):
+        model_path = _resolve_model_path(config.model_name)
+        client = _get_or_start_llama_server(model_path, config.n_ctx, config.n_gpu_layers)
         messages = _build_messages(question, context_chunks, config.model_name)
-        logger.info("Calling llama.cpp (model=%s, temp=%.2f)", config.model_name, config.temperature)
-        response = llm.create_chat_completion(  # type: ignore[union-attr]
+        logger.info(
+            "Calling llama-server (model=%s, temp=%.2f)", config.model_name, config.temperature
+        )
+        response = client.chat.completions.create(  # type: ignore[union-attr]
+            model=os.path.basename(model_path),
             messages=messages,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
         )
-        return (response["choices"][0]["message"]["content"] or "").strip()
+        return (response.choices[0].message.content or "").strip()
 
     try:
         client, messages = _prepare(question, context_chunks, config)
@@ -205,7 +467,7 @@ def generate_answer(
         messages=messages,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
-        extra_body={"num_ctx": 2048, "keep_alive": "30m"},
+        extra_body={"num_ctx": config.n_ctx, "keep_alive": "30m"},
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -217,8 +479,11 @@ def stream_answer(
 ) -> Iterator[str]:
     """Yield text chunks as they arrive from the LLM (streaming).
 
-    Uses llama.cpp when *config.model_name* ends with ``.gguf``;
-    otherwise delegates to Ollama via the OpenAI-compatible API.
+    Backend selection:
+
+    * HuggingFace repo IDs (``org/repo``) and local ``.gguf`` file paths use
+      **llama.cpp** via ``llama-server``.
+    * All other model names delegate to **Ollama**.
 
     Usage::
 
@@ -232,22 +497,24 @@ def stream_answer(
         yield "No context available to answer the question."
         return
 
-    if _is_gguf_model(config.model_name):
-        llm = _get_llama_model(config.model_name, config.n_ctx, config.n_gpu_layers)
+    if _is_llama_backend(config.model_name):
+        model_path = _resolve_model_path(config.model_name)
+        client = _get_or_start_llama_server(model_path, config.n_ctx, config.n_gpu_layers)
         messages = _build_messages(question, context_chunks, config.model_name)
         logger.info(
-            "Calling llama.cpp streaming (model=%s, temp=%.2f)",
+            "Calling llama-server streaming (model=%s, temp=%.2f)",
             config.model_name,
             config.temperature,
         )
-        response = llm.create_chat_completion(  # type: ignore[union-attr]
+        response = client.chat.completions.create(  # type: ignore[union-attr]
+            model=os.path.basename(model_path),
             messages=messages,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             stream=True,
         )
         for chunk in response:
-            delta = chunk["choices"][0]["delta"].get("content", "")
+            delta = chunk.choices[0].delta.content
             if delta:
                 yield delta
         return
@@ -265,7 +532,7 @@ def stream_answer(
         temperature=config.temperature,
         max_tokens=config.max_tokens,
         stream=True,
-        extra_body={"num_ctx": 2048, "keep_alive": "30m"},
+        extra_body={"num_ctx": config.n_ctx, "keep_alive": "30m"},
     )
     for chunk in response:
         delta = chunk.choices[0].delta.content
@@ -280,11 +547,16 @@ def describe_llm_error(exc: Exception, model_name: str) -> tuple[str, str | None
     """
     msg = str(exc)
 
-    if _is_gguf_model(model_name):
+    if _is_llama_backend(model_name):
         if isinstance(exc, FileNotFoundError):
-            return (str(exc), None)
+            # Missing llama-server binary vs missing GGUF file
+            if "llama-server" in msg:
+                return (msg, "brew install llama-cpp")
+            return (msg, None)
         if isinstance(exc, ImportError):
-            return (msg, "uv pip install llama-cpp-python")
+            return (msg, "uv pip install huggingface-hub")
+        if isinstance(exc, RuntimeError) and "llama-server" in msg:
+            return (msg, "brew install llama-cpp")
         return (f"llama.cpp error for '{model_name}': {msg}", None)
 
     try:

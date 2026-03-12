@@ -21,6 +21,8 @@ _RC_KEY_MAP: dict[str, tuple[str, type]] = {
     "threshold": ("retriever.score_threshold", float),
     "index-dir": ("index_dir", str),
     "input-dir": ("input_dir", str),
+    "n-ctx": ("llm.n_ctx", int),
+    "n-gpu-layers": ("llm.n_gpu_layers", int),
 }
 
 
