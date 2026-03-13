@@ -24,7 +24,6 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 from collections.abc import Iterator
@@ -44,6 +43,9 @@ _model_checked: set[str] = set()
 # llama-server process and client caches (keyed by (model_path, n_ctx, n_gpu_layers))
 _llama_server_procs: dict[tuple, subprocess.Popen] = {}
 _llama_server_clients: dict[tuple, object] = {}
+
+# Seconds to wait for a llama-server process to exit cleanly before assuming port conflict
+_PROC_WAIT_TIMEOUT = 5
 
 SYSTEM_PROMPT = (
     "You are a helpful research assistant. "
@@ -194,12 +196,6 @@ def _download_hf_gguf(repo_id: str) -> str:
     if chosen is None:
         chosen = gguf_files[0]
 
-    print(
-        f"Downloading '{chosen}' from {repo_id} "
-        "(cached in ~/.cache/huggingface/hub/) ...",
-        file=sys.stderr,
-        flush=True,
-    )
     logger.info("Downloading '%s' from %s ...", chosen, repo_id)
     local_path = hf_hub_download(repo_id=repo_id, filename=chosen)
     logger.info("Model ready at %s", local_path)
@@ -257,7 +253,6 @@ def _find_free_port() -> int:
     """Return a free TCP port on localhost."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return s.getsockname()[1]
 
 
@@ -303,41 +298,63 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
         _llama_server_procs.pop(cache_key, None)
 
     llama_server = _find_llama_server_binary()
-    port = _find_free_port()
 
-    cmd = [
-        llama_server,
-        "--model", model_path,
-        "--port", str(port),
-        "--ctx-size", str(n_ctx),
-        "--n-gpu-layers", str(n_gpu_layers),
-        "--parallel", "1",
-    ]
-
-    model_label = os.path.basename(model_path)
-    log_path = os.path.join(
-        tempfile.gettempdir(), f"paperrag-llama-server-{port}.log"
-    )
-    print(
-        f"Starting llama-server for '{model_label}' on port {port} "
-        "(first query may be slow while the model loads) ...",
-        file=sys.stderr,
-        flush=True,
-    )
-    logger.info(
-        "llama-server cmd: %s  (stderr → %s)", " ".join(cmd), log_path
-    )
-
-    with open(log_path, "w") as log_fh:
-        proc = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=log_fh
-        )
-    atexit.register(proc.terminate)
-    _llama_server_procs[cache_key] = proc
-
+    # Retry port selection to guard against the TOCTOU window between
+    # _find_free_port() releasing the ephemeral port and llama-server binding it.
+    _MAX_PORT_RETRIES = 3
     _server_timeout = 120.0
-    if not _wait_for_llama_server(port, timeout=_server_timeout):
+    for attempt in range(1, _MAX_PORT_RETRIES + 1):
+        port = _find_free_port()
+
+        cmd = [
+            llama_server,
+            "--model", model_path,
+            "--port", str(port),
+            "--ctx-size", str(n_ctx),
+            "--n-gpu-layers", str(n_gpu_layers),
+            "--parallel", "1",
+        ]
+
+        model_label = os.path.basename(model_path)
+        log_path = os.path.join(
+            tempfile.gettempdir(), f"paperrag-llama-server-{port}.log"
+        )
+        logger.info(
+            "Starting llama-server for '%s' on port %d (attempt %d/%d, stderr → %s)",
+            model_label,
+            port,
+            attempt,
+            _MAX_PORT_RETRIES,
+            log_path,
+        )
+        logger.info("llama-server cmd: %s", " ".join(cmd))
+
+        with open(log_path, "w") as log_fh:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=log_fh
+            )
+        atexit.register(proc.terminate)
+
+        if _wait_for_llama_server(port, timeout=_server_timeout):
+            _llama_server_procs[cache_key] = proc
+            logger.info("llama-server ready on port %d", port)
+            client = OpenAI(api_key="not-needed", base_url=f"http://localhost:{port}/v1")
+            _llama_server_clients[cache_key] = client
+            return client
+
+        # Server did not become ready — check if it died immediately (port race)
+        # or just timed out (model loading issue)
         proc.terminate()
+        return_code = proc.wait(timeout=_PROC_WAIT_TIMEOUT)
+        server_failed_immediately = return_code is not None and return_code != 0
+        if server_failed_immediately and attempt < _MAX_PORT_RETRIES:
+            logger.warning(
+                "llama-server exited (rc=%d) on port %d; retrying with a new port ...",
+                return_code,
+                port,
+            )
+            continue
+        # Either timed out (model issue) or exhausted retries
         raise RuntimeError(
             f"llama-server failed to start on port {port} within "
             f"{int(_server_timeout)}s. "
@@ -346,10 +363,8 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
             "(brew install llama-cpp)."
         )
 
-    logger.info("llama-server ready on port %d", port)
-    client = OpenAI(api_key="not-needed", base_url=f"http://localhost:{port}/v1")
-    _llama_server_clients[cache_key] = client
-    return client
+    # Should be unreachable (loop always returns or raises), but satisfies type checkers
+    raise RuntimeError("llama-server could not be started after retries.")
 
 
 # ---------------------------------------------------------------------------

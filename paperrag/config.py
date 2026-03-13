@@ -201,12 +201,19 @@ class LLMConfig(BaseModel):
     n_ctx: int = Field(
         default=2048,
         ge=512,
-        description="Context window size for llama.cpp GGUF models",
+        description=(
+            "Context window size. "
+            "For llama.cpp (GGUF models via llama-server) this sets --ctx-size. "
+            "For Ollama it is forwarded as num_ctx in the extra_body parameter."
+        ),
     )
     n_gpu_layers: int = Field(
         default=0,
         ge=0,
-        description="Number of layers to offload to GPU for llama.cpp GGUF models (0 = CPU only)",
+        description=(
+            "Number of layers to offload to GPU for llama.cpp GGUF models (0 = CPU only). "
+            "Has no effect when using the Ollama backend."
+        ),
     )
 
 
