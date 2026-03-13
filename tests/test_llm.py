@@ -76,6 +76,16 @@ def test_is_hf_model_bare_name():
     assert _is_hf_model("llama3") is False
 
 
+def test_is_hf_model_ollama_namespaced():
+    """Ollama library/model:tag format must NOT be treated as a HF repo ID."""
+    assert _is_hf_model("library/llama3:latest") is False
+
+
+def test_is_hf_model_relative_parent_path():
+    """Relative parent paths like ../parent/child must NOT be treated as HF repo IDs."""
+    assert _is_hf_model("../parent/child") is False
+
+
 # ---------------------------------------------------------------------------
 # _is_llama_backend
 # ---------------------------------------------------------------------------

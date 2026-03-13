@@ -26,6 +26,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import urllib.request
 from collections.abc import Iterator
 
 from paperrag.config import LLMConfig
@@ -46,6 +47,22 @@ _llama_server_clients: dict[tuple, object] = {}
 
 # Seconds to wait for a llama-server process to exit cleanly before assuming port conflict
 _PROC_WAIT_TIMEOUT = 5
+
+
+def _cleanup_llama_servers() -> None:
+    """Terminate all managed llama-server processes at interpreter exit."""
+    for proc in list(_llama_server_procs.values()):
+        try:
+            proc.terminate()
+            proc.wait(timeout=_PROC_WAIT_TIMEOUT)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+atexit.register(_cleanup_llama_servers)
 
 SYSTEM_PROMPT = (
     "You are a helpful research assistant. "
@@ -92,9 +109,17 @@ def _is_gguf_model(model_name: str) -> bool:
 def _is_hf_model(model_name: str) -> bool:
     """Return True if *model_name* is a HuggingFace repo ID (e.g. ``Qwen/Qwen3-1.7B-GGUF``).
 
-    HF repo IDs have the form ``owner/repo`` and do not start with ``/``, ``./``, or ``~``.
+    HF repo IDs have the form ``owner/repo`` with no path prefix and no Ollama tag syntax.
+    Excluded patterns:
+
+    * Absolute or relative paths: ``/…``, ``./…``, ``~/…``, or any path containing ``..``
+    * Ollama namespaced models with a tag: ``library/llama3:latest``, ``org/model:tag``
     """
-    if model_name.startswith(("/", "./", "~")):
+    if model_name.startswith(("/", "./", "~/")):
+        return False
+    if ".." in model_name.split("/"):  # catch ../, ../../, etc.
+        return False
+    if ":" in model_name:  # Ollama tag syntax, e.g. qwen2.5:1.5b or library/model:tag
         return False
     parts = model_name.split("/")
     return len(parts) == 2 and all(parts)
@@ -258,8 +283,6 @@ def _find_free_port() -> int:
 
 def _wait_for_llama_server(port: int, timeout: float = 120.0) -> bool:
     """Poll ``http://localhost:{port}/health`` until the server is ready."""
-    import urllib.request
-
     url = f"http://localhost:{port}/health"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -333,9 +356,9 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=log_fh
             )
-        atexit.register(proc.terminate)
 
         if _wait_for_llama_server(port, timeout=_server_timeout):
+            # Register in the cache — cleanup is handled by _cleanup_llama_servers
             _llama_server_procs[cache_key] = proc
             logger.info("llama-server ready on port %d", port)
             client = OpenAI(api_key="not-needed", base_url=f"http://localhost:{port}/v1")
@@ -353,6 +376,11 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
                 return_code,
                 port,
             )
+            # Clean up the log file for this failed attempt
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
             continue
         # Either timed out (model issue) or exhausted retries
         raise RuntimeError(

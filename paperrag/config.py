@@ -211,8 +211,9 @@ class LLMConfig(BaseModel):
         default=0,
         ge=0,
         description=(
-            "Number of layers to offload to GPU for llama.cpp GGUF models (0 = CPU only). "
-            "Has no effect when using the Ollama backend."
+            "Number of layers to offload to GPU when using the llama.cpp backend (0 = CPU only). "
+            "Ollama manages GPU offloading independently via its own configuration; "
+            "this field has no effect on the Ollama backend."
         ),
     )
 
