@@ -21,6 +21,8 @@ _RC_KEY_MAP: dict[str, tuple[str, type]] = {
     "threshold": ("retriever.score_threshold", float),
     "index-dir": ("index_dir", str),
     "input-dir": ("input_dir", str),
+    "n-ctx": ("llm.n_ctx", int),
+    "n-gpu-layers": ("llm.n_gpu_layers", int),
 }
 
 
@@ -196,6 +198,24 @@ class LLMConfig(BaseModel):
     model_name: str = "qwen2.5:1.5b"
     temperature: float = 0.0
     max_tokens: int = 128
+    n_ctx: int = Field(
+        default=2048,
+        ge=512,
+        description=(
+            "Context window size. "
+            "For llama.cpp (GGUF models via llama-server) this sets --ctx-size. "
+            "For Ollama it is forwarded as num_ctx in the extra_body parameter."
+        ),
+    )
+    n_gpu_layers: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Number of layers to offload to GPU when using the llama.cpp backend (0 = CPU only). "
+            "Ollama manages GPU offloading independently via its own configuration; "
+            "this field has no effect on the Ollama backend."
+        ),
+    )
 
 
 class PaperRAGConfig(BaseModel):
