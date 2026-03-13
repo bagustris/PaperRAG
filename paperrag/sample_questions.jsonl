@@ -1,0 +1,10 @@
+{"question": "What is the attention mechanism described in the Transformer model?", "relevant_documents": ["Vaswani et al. - 2017 - Attention is all you need.pdf"]}
+{"question": "What is the Machine Speech Chain approach and how does it work?", "relevant_documents": ["Tjandra, Sakti, Nakamura - 2020 - Machine Speech Chain.pdf"]}
+{"question": "What acoustic features are commonly used in speech emotion recognition?", "relevant_documents": ["El Ayadi, Kamel, Karray - 2011 - Survey on speech emotion recognition Features, classification schemes, and databases.pdf"]}
+{"question": "How does bimodal fusion of acoustic and linguistic information improve emotion recognition?", "relevant_documents": ["Atmaja, Sasou, Akagi - 2022 - Survey on bimodal speech emotion recognition from acoustic and linguistic information fusion.pdf"]}
+{"question": "What is the relationship between climate and tonal languages?", "relevant_documents": ["Everett, Blasi, Roberts - 2015 - Climate, vocal folds, and tonal languages Connecting the physiological and geographic dots.pdf"]}
+{"question": "What is the Fujisaki model of prosody and how does it represent tonal features?", "relevant_documents": ["Fujisaki - 2003 - Prosody, Information, and Modeling with Emphasis on Tonal Features of Speech.pdf"]}
+{"question": "What factors predict publication success for biologists?", "relevant_documents": ["William F. Laurance et al. - 2013 - Predicting Publication Success for Biologists.pdf"]}
+{"question": "What is Video-Audio-Text Transformer (VATT) and how does it learn multimodal representations?", "relevant_documents": ["11382_vatt_transformers_for_multimod.pdf"]}
+{"question": "What is Nkululeko and what speaker characteristics can it predict?", "relevant_documents": ["Burkhardt, Atmaja - 2025 - Nkululeko 1 . 0 A Python package to predict speaker characteristics with a high-level interface How Does It.pdf"]}
+{"question": "How does the SpeechAIN toolkit implement the machine speech chain for large-scale training?", "relevant_documents": ["Qi et al. - Unknown - SPEECHAIN A SPEECH TOOLKIT FOR LARGE-SCALE MACHINE SPEECH CHAIN.pdf"]}
