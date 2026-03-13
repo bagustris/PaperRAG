@@ -368,8 +368,12 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
         # Server did not become ready — check if it died immediately (port race)
         # or just timed out (model loading issue)
         proc.terminate()
-        return_code = proc.wait(timeout=_PROC_WAIT_TIMEOUT)
-        server_failed_immediately = return_code is not None and return_code != 0
+        try:
+            return_code = proc.wait(timeout=_PROC_WAIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return_code = proc.wait()
+        server_failed_immediately = return_code != 0
         if server_failed_immediately and attempt < _MAX_PORT_RETRIES:
             logger.warning(
                 "llama-server exited (rc=%d) on port %d; retrying with a new port ...",
