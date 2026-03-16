@@ -96,6 +96,26 @@ Retrieval: 0.05s | LLM: 8.65s | Total: 8.69s
 
 ------------------------------------------------------------------------
 
+## Benchmarking
+
+Compare how different small LLMs perform on RAG questions:
+
+    python -m paperrag.llm_benchmark --index-dir /path/to/index
+
+With specific models:
+
+    python -m paperrag.llm_benchmark --index-dir /path/to/index --models qwen2.5:1.5b,llama3.2:3b
+
+With LLM-as-judge scoring (requires a larger model):
+
+    python -m paperrag.llm_benchmark --index-dir /path/to/index --judge-model llama3.3:70b
+
+Outputs:
+- Per-model comparison table in `paperrag/results.md`
+- Experiment logs in `experiments/logs/`
+
+------------------------------------------------------------------------
+
 ## Persistent Configuration
 
 Create `~/.paperragrc` (global) or `.paperragrc` (per-project) in TOML format to avoid repeating CLI flags:
