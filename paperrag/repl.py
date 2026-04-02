@@ -65,9 +65,10 @@ class _SlashCompleter(Completer):
         # Only complete when the line starts with '/'
         if not text.startswith("/"):
             return
-        # The word being completed is everything from the first '/' up to the cursor
-        parts = text.split()
-        word = parts[0] if parts else "/"
+        # Stop completing once the user has typed a space (command is finished)
+        if " " in text:
+            return
+        word = text
         for cmd in SLASH_COMMANDS:
             if cmd.startswith(word):
                 # Yield the remainder so it appends to what's already typed
@@ -180,6 +181,8 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
                     console.print(f"[red]Path does not exist: {new_path}[/red]")
                     continue
                 cfg.input_dir = str(path_obj)
+                # Reset index_dir so it auto-derives from the new input path
+                cfg._index_dir = None
             _handle_index(cfg)
             retriever = None  # force reload after re-index
             continue
@@ -187,6 +190,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         if cmd_parts[0] == "/topk":
             if len(cmd_parts) == 2 and cmd_parts[1].isdigit():
                 top_k = int(cmd_parts[1])
+                cfg.retriever.top_k = top_k
                 console.print(f"top-k set to [cyan]{top_k}[/cyan]")
             else:
                 console.print("[yellow]Usage: /topk <number>[/yellow]")

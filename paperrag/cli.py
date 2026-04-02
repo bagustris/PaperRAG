@@ -538,7 +538,9 @@ def review(
     cfg.input_dir = str(path_obj)
     if index_dir:
         cfg.index_dir = index_dir
-    # else: index_dir auto-derives from input_path (see PaperRAGConfig.index_dir property)
+    else:
+        # Clear any RC-set index_dir so it auto-derives from input_path
+        cfg._index_dir = None
 
     if model:
         cfg.llm.model_name = model
@@ -550,6 +552,13 @@ def review(
         cfg.llm.temperature = temperature
     if max_tokens is not None:
         cfg.llm.max_tokens = max_tokens
+
+    # Validate that PDFs can be found before indexing
+    from paperrag.parser import discover_pdfs
+    pdfs = discover_pdfs(path_obj)
+    if not pdfs:
+        console.print(f"[red]Error: No PDFs found at {input_path}[/red]")
+        raise typer.Exit(1)
 
     _print_gpu_info()
 
