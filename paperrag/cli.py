@@ -495,7 +495,85 @@ def index(
     console.print("="*60)
 
 
-# -- query -----------------------------------------------------------------
+# -- review ----------------------------------------------------------------
+@app.command()
+def review(
+    input_path: str = typer.Argument(..., help="PDF file or directory to review"),
+    index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: auto-derived from input path)"),
+    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
+    topk: int = typer.Option(None, "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
+    threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
+    temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
+    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
+) -> None:
+    """Index a PDF file (or directory) and start an interactive review session.
+
+    Convenience command for focused paper review — equivalent to running:
+
+        paperrag index --input-dir <path> && paperrag --index-dir <auto>
+
+    Examples:
+
+        paperrag review paper.pdf
+
+        paperrag review ./papers/ --topk 5
+
+        paperrag review paper.pdf --index-dir /tmp/my-index
+    """
+    from paperrag.repl import _handle_index, start_repl
+
+    path_obj = Path(input_path)
+    if not path_obj.exists():
+        console.print(f"[red]Error: Path does not exist: {input_path}[/red]")
+        raise typer.Exit(1)
+
+    cfg = PaperRAGConfig()
+
+    # Load .paperragrc: global first, then local overrides
+    global_rc = load_rc(Path.home() / ".paperragrc")
+    local_rc = load_rc(Path.cwd() / ".paperragrc")
+    apply_rc(cfg, global_rc)
+    apply_rc(cfg, local_rc)
+
+    cfg.input_dir = str(path_obj)
+    if index_dir:
+        cfg.index_dir = index_dir
+    else:
+        # Clear any RC-set index_dir so it auto-derives from input_path
+        cfg._index_dir = None
+
+    if model:
+        cfg.llm.model_name = model
+    if topk is not None:
+        cfg.retriever.top_k = topk
+    if threshold is not None:
+        cfg.retriever.score_threshold = threshold
+    if temperature is not None:
+        cfg.llm.temperature = temperature
+    if max_tokens is not None:
+        cfg.llm.max_tokens = max_tokens
+
+    # Validate that PDFs can be found before indexing
+    from paperrag.parser import discover_pdfs
+    pdfs = discover_pdfs(path_obj)
+    if not pdfs:
+        console.print(f"[red]Error: No PDFs found at {input_path}[/red]")
+        raise typer.Exit(1)
+
+    _print_gpu_info()
+
+    # Step 1: Index the content
+    if path_obj.is_file():
+        console.print(f"[bold]Indexing:[/bold] [cyan]{path_obj.name}[/cyan]")
+    else:
+        console.print(f"[bold]Indexing:[/bold] [cyan]{path_obj}[/cyan]")
+    _handle_index(cfg)
+
+    # Step 2: Start interactive review session
+    console.print()
+    start_repl(cfg)
+
+
 @app.command()
 def query(
     question: str = typer.Argument(..., help="Your question"),

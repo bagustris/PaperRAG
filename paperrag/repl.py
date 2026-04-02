@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console
 from rich.table import Table
@@ -19,21 +21,58 @@ from paperrag.parser import discover_pdfs
 
 console = Console()
 
+# All slash-commands available in the REPL
+SLASH_COMMANDS: list[str] = [
+    "/index",
+    "/topk",
+    "/threshold",
+    "/temperature",
+    "/max-tokens",
+    "/model",
+    "/config",
+    "/rc",
+    "/help",
+    "/exit",
+    "/quit",
+]
+
 HELP_TEXT = """\
 [bold]Available commands:[/bold]
-  [cyan]<any text>[/cyan]       Query the indexed papers (uses top-k retrieval + LLM)
-  [cyan]index[/cyan]            Re-index the PDF directory
-  [cyan]topk <n>[/cyan]         Set top-k for retrieval (default: 3)
-  [cyan]threshold <n>[/cyan]    Set similarity threshold 0.0-1.0 (default: 0.15)
-  [cyan]temperature <n>[/cyan]  Set LLM temperature 0.0-2.0 (default: 0.0)
-  [cyan]max-tokens <n>[/cyan]   Set LLM max output tokens (default: 256)
-  [cyan]model <name>[/cyan]     Set LLM model name
-  [cyan]config[/cyan]           Show current configuration
-  [cyan]rc[/cyan]               Show loaded .paperragrc files and values
-  [cyan]help[/cyan]             Show this help message
-  [cyan]exit[/cyan] / [cyan]quit[/cyan]      Exit the REPL
+  [cyan]<any text>[/cyan]              Query the indexed papers (uses top-k retrieval + LLM)
+  [cyan]/index[/cyan]                  Re-index the current PDF directory/file
+  [cyan]/index <path>[/cyan]           Re-index a specific PDF file or directory
+  [cyan]/topk <n>[/cyan]               Set top-k for retrieval (default: 3)
+  [cyan]/threshold <n>[/cyan]          Set similarity threshold 0.0-1.0 (default: 0.15)
+  [cyan]/temperature <n>[/cyan]        Set LLM temperature 0.0-2.0 (default: 0.0)
+  [cyan]/max-tokens <n>[/cyan]         Set LLM max output tokens (default: 256)
+  [cyan]/model <name>[/cyan]           Set LLM model name
+  [cyan]/config[/cyan]                 Show current configuration
+  [cyan]/rc[/cyan]                     Show loaded .paperragrc files and values
+  [cyan]/help[/cyan]                   Show this help message
+  [cyan]/exit[/cyan] / [cyan]/quit[/cyan]              Exit the REPL
+
+[dim]Tip: type [bold]/[/bold] and press Tab to see a list of all commands.[/dim]
 """
 
+
+class _SlashCompleter(Completer):
+    """Show slash-command completions when the input starts with '/'."""
+
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ):
+        text = document.text_before_cursor
+        # Only complete when the line starts with '/'
+        if not text.startswith("/"):
+            return
+        # Stop completing once the user has typed a space (command is finished)
+        if " " in text:
+            return
+        word = text
+        for cmd in SLASH_COMMANDS:
+            if cmd.startswith(word):
+                # Yield the remainder so it appends to what's already typed
+                yield Completion(cmd[len(word):], start_position=0, display=cmd)
 
 def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     """Launch the interactive REPL session."""
@@ -92,7 +131,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     console.print(f"Temperature: [cyan]{cfg.llm.temperature}[/cyan] (0.0=deterministic, higher=creative)")
     console.print(f"Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan] (max output length)")
 
-    console.print("Type [cyan]help[/cyan] for commands.\n")
+    console.print("Type [cyan]/help[/cyan] for commands, or [cyan]/[/cyan] + Tab for autocomplete.\n")
 
     top_k = cfg.retriever.top_k
 
@@ -108,8 +147,12 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     # Suppress INFO logs during interactive session to keep output clean.
     logging.getLogger().setLevel(logging.WARNING)
 
-    # Create prompt session with history support for arrow keys
-    session = PromptSession(history=InMemoryHistory())
+    # Create prompt session with history and slash-command completion
+    session = PromptSession(
+        history=InMemoryHistory(),
+        completer=_SlashCompleter(),
+        complete_while_typing=False,  # only complete on Tab
+    )
 
     while True:
         try:
@@ -121,79 +164,85 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         if not command:
             continue
 
-        if command in ("exit", "quit"):
+        if command in ("/exit", "/quit"):
             console.print("Bye!")
             break
 
-        if command == "help":
+        if command == "/help":
             console.print(HELP_TEXT)
             continue
 
-        if command == "index":
+        cmd_parts = command.split(maxsplit=1)
+        if cmd_parts[0] == "/index":
+            if len(cmd_parts) == 2:
+                new_path = cmd_parts[1].strip()
+                path_obj = Path(new_path)
+                if not path_obj.exists():
+                    console.print(f"[red]Path does not exist: {new_path}[/red]")
+                    continue
+                cfg.input_dir = str(path_obj)
+                # Reset index_dir so it auto-derives from the new input path
+                cfg._index_dir = None
             _handle_index(cfg)
             retriever = None  # force reload after re-index
             continue
 
-        if command.startswith("topk"):
-            parts = command.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                top_k = int(parts[1])
+        if cmd_parts[0] == "/topk":
+            if len(cmd_parts) == 2 and cmd_parts[1].isdigit():
+                top_k = int(cmd_parts[1])
+                cfg.retriever.top_k = top_k
                 console.print(f"top-k set to [cyan]{top_k}[/cyan]")
             else:
-                console.print("[yellow]Usage: topk <number>[/yellow]")
+                console.print("[yellow]Usage: /topk <number>[/yellow]")
             continue
 
-        if command.startswith("threshold"):
-            parts = command.split()
-            if len(parts) == 2:
+        if cmd_parts[0] == "/threshold":
+            if len(cmd_parts) == 2:
                 try:
-                    threshold_val = float(parts[1])
+                    threshold_val = float(cmd_parts[1])
                     if 0.0 <= threshold_val <= 1.0:
                         cfg.retriever.score_threshold = threshold_val
                         console.print(f"Threshold set to [cyan]{threshold_val}[/cyan]")
                     else:
                         console.print("[yellow]Threshold must be between 0.0 and 1.0[/yellow]")
                 except ValueError:
-                    console.print("[yellow]Usage: threshold <number>[/yellow]")
+                    console.print("[yellow]Usage: /threshold <number>[/yellow]")
             else:
-                console.print("[yellow]Usage: threshold <number>[/yellow]")
+                console.print("[yellow]Usage: /threshold <number>[/yellow]")
             continue
 
-        if command.startswith("temperature"):
-            parts = command.split()
-            if len(parts) == 2:
+        if cmd_parts[0] == "/temperature":
+            if len(cmd_parts) == 2:
                 try:
-                    temp_val = float(parts[1])
+                    temp_val = float(cmd_parts[1])
                     if 0.0 <= temp_val <= 2.0:
                         cfg.llm.temperature = temp_val
                         console.print(f"Temperature set to [cyan]{temp_val}[/cyan]")
                     else:
                         console.print("[yellow]Temperature must be between 0.0 and 2.0[/yellow]")
                 except ValueError:
-                    console.print("[yellow]Usage: temperature <number>[/yellow]")
+                    console.print("[yellow]Usage: /temperature <number>[/yellow]")
             else:
-                console.print("[yellow]Usage: temperature <number>[/yellow]")
+                console.print("[yellow]Usage: /temperature <number>[/yellow]")
             continue
 
-        if command.startswith("max-tokens"):
-            parts = command.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                cfg.llm.max_tokens = int(parts[1])
+        if cmd_parts[0] == "/max-tokens":
+            if len(cmd_parts) == 2 and cmd_parts[1].isdigit():
+                cfg.llm.max_tokens = int(cmd_parts[1])
                 console.print(f"Max tokens set to [cyan]{cfg.llm.max_tokens}[/cyan]")
             else:
-                console.print("[yellow]Usage: max-tokens <number>[/yellow]")
+                console.print("[yellow]Usage: /max-tokens <number>[/yellow]")
             continue
 
-        if command.startswith("model"):
-            parts = command.split(maxsplit=1)
-            if len(parts) == 2:
-                cfg.llm.model_name = parts[1]
-                console.print(f"LLM model set to {parts[1]}")
+        if cmd_parts[0] == "/model":
+            if len(cmd_parts) == 2:
+                cfg.llm.model_name = cmd_parts[1]
+                console.print(f"LLM model set to {cmd_parts[1]}")
             else:
-                console.print("[yellow]Usage: model <model-name>[/yellow]")
+                console.print("[yellow]Usage: /model <model-name>[/yellow]")
             continue
 
-        if command == "config":
+        if command == "/config":
             console.print("\n[bold]Current Configuration:[/bold]")
             console.print("[bold]LLM:[/bold]")
             console.print(f"  Model: [cyan]{cfg.llm.model_name}[/cyan]")
@@ -204,7 +253,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]\n")
             continue
 
-        if command == "rc":
+        if command == "/rc":
             global_path = Path.home() / ".paperragrc"
             local_path = Path.cwd() / ".paperragrc"
             console.print("\n[bold].paperragrc files:[/bold]")
@@ -217,6 +266,14 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
                 else:
                     console.print(f"  [dim]{label}[/dim]: {rc_path} [dim](not found)[/dim]")
             console.print()
+            continue
+
+        # Unknown slash-command: give a hint instead of treating it as a query
+        if command.startswith("/"):
+            console.print(
+                f"[yellow]Unknown command: {cmd_parts[0]}. "
+                "Type [bold]/help[/bold] to see available commands.[/yellow]"
+            )
             continue
 
         # Anything else is treated as a query
