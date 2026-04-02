@@ -510,7 +510,7 @@ def review(
 
     Convenience command for focused paper review — equivalent to running:
 
-        paperrag index --input-dir <path> && paperrag --input-dir <path> --index-dir <auto>
+        paperrag index --input-dir <path> && paperrag --index-dir <auto>
 
     Examples:
 

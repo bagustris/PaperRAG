@@ -136,8 +136,66 @@ def test_review_input_dir_set_to_argument(tmp_path):
 
 
 def test_repl_help_text_documents_index_path():
-    """REPL HELP_TEXT mentions 'index <path>' command."""
+    """REPL HELP_TEXT mentions '/index <path>' command."""
     from paperrag.repl import HELP_TEXT
 
-    assert "index <path>" in HELP_TEXT
+    assert "/index <path>" in HELP_TEXT
+
+
+def test_repl_slash_commands_list():
+    """Core REPL slash-commands are present in SLASH_COMMANDS."""
+    from paperrag.repl import SLASH_COMMANDS
+
+    required = {"/index", "/topk", "/threshold", "/temperature", "/max-tokens",
+                "/model", "/config", "/rc", "/help", "/exit", "/quit"}
+    assert required.issubset(set(SLASH_COMMANDS))
+
+
+def test_slash_completer_returns_completions():
+    """_SlashCompleter yields completions when input starts with '/'."""
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+    from prompt_toolkit.formatted_text import to_plain_text
+
+    from paperrag.repl import _SlashCompleter
+
+    completer = _SlashCompleter()
+    doc = Document("/")
+    completions = list(completer.get_completions(doc, CompleteEvent()))
+    displayed = [to_plain_text(c.display) for c in completions]
+    assert "/help" in displayed
+    assert "/index" in displayed
+
+
+def test_slash_completer_no_completions_for_plain_text():
+    """_SlashCompleter returns nothing for non-slash input."""
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    from paperrag.repl import _SlashCompleter
+
+    completer = _SlashCompleter()
+    doc = Document("what is attention?")
+    completions = list(completer.get_completions(doc, CompleteEvent()))
+    assert completions == []
+
+
+def test_slash_completer_partial_match():
+    """_SlashCompleter filters to commands matching the typed prefix."""
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+    from prompt_toolkit.formatted_text import to_plain_text
+
+    from paperrag.repl import _SlashCompleter
+
+    completer = _SlashCompleter()
+    doc = Document("/t")
+    completions = list(completer.get_completions(doc, CompleteEvent()))
+    displayed = [to_plain_text(c.display) for c in completions]
+    # /topk, /threshold, /temperature all start with /t
+    assert "/topk" in displayed
+    assert "/threshold" in displayed
+    assert "/temperature" in displayed
+    # /config does not
+    assert "/config" not in displayed
 
