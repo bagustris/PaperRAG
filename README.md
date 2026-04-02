@@ -4,6 +4,7 @@ Local-first Retrieval-Augmented Generation (RAG) system for querying academic PD
 
 Demo: https://asciinema.org/a/789531  
 Deepwiki:  https://deepwiki.com/bagustris/PaperRAG
+
 ------------------------------------------------------------------------
 
 ## Features
