@@ -2,8 +2,8 @@
 
 Local-first Retrieval-Augmented Generation (RAG) system for querying academic PDF collections.
 
-Demo: https://asciinema.org/a/789531
-
+Demo: https://asciinema.org/a/789531  
+Deepwiki:  https://deepwiki.com/bagustris/PaperRAG
 ------------------------------------------------------------------------
 
 ## Features
@@ -130,7 +130,7 @@ topk = 2
 
 ## Documentation
 
-Full usage guide, troubleshooting, and project structure: [paperrag.readthedocs.org](https://paperrag.readthedocs.org)
+Full usage guide, troubleshooting, and project structure: [paperrag.readthedocs.org](https://paperrag.readthedocs.org) (use deepwiki to ask question regarding paperrag).
 
 ------------------------------------------------------------------------
 
@@ -139,7 +139,7 @@ Full usage guide, troubleshooting, and project structure: [paperrag.readthedocs.
 MIT
 
 ## Note
-- This project was born as answer to [my own question](https://academia.stackexchange.com/questions/203900/local-rag-like-chatgpt-for-abundant-of-pdfs/225980#225980). 
+- This project was born as an answer to [my own question](https://academia.stackexchange.com/questions/203900/local-rag-like-chatgpt-for-abundant-of-pdfs/225980#225980). 
 - On my laptop (Dell XPS 9320, i7-1260P 16GB RAM), it takes about **20 hours** to index ~2000 PDFs with default configuration.
 
 ## Citation  
