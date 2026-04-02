@@ -1,6 +1,6 @@
 [project]
 name = "paperrag"
-version = "0.4.1"
+version = "0.4.2"
 description = "Local RAG for academic PDFs"
 authors = [{name = "PaperRAG Team"}]
 readme = "README.md"
@@ -9,7 +9,8 @@ dependencies = [
     "docling",
     "sentence-transformers",
     "faiss-cpu",
-    "torch",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
     "numpy",
     "pydantic>=2.5,<3.0",
     "typer>=0.9",
@@ -24,9 +25,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gpu = [
-    "torch",  # reinstalled from default PyPI index (CUDA-bundled)
-]
 llm = [
     "transformers>=4.38",
     "accelerate>=0.27",
@@ -61,16 +59,14 @@ filterwarnings = [
     "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
 ]
 
-# CPU-only torch is the default (avoids ~2.5GB CUDA download).
-# Install with GPU/CUDA support: uv pip install -e ".[gpu]"
-#
-# How it works:
-#   - Default (no extras): torch pulled from pytorch-cpu index (CPU-only, ~200MB)
-#   - With [gpu] extra: torch pulled from PyPI (CUDA-bundled, ~2.5GB)
+# CPU-only torch is the default (avoids CUDA downloads during `uv sync`).
+# A `gpu` extra would require torch to move out of the default dependencies
+# into mutually-exclusive CPU/GPU extras, which would break plain `uv sync`.
+# GPU users can reinstall torch from their preferred CUDA index explicitly.
 [tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu", marker = "extra != 'gpu'" },
-]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

@@ -10,9 +10,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import fitz  # PyMuPDF
-from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
 
 from paperrag.config import ParserConfig
 
@@ -39,6 +36,15 @@ SECTION_NAMES = [
     "acknowledgements",
     "appendix",
 ]
+
+
+def _import_docling():
+    """Import Docling lazily so non-indexing commands avoid heavy vision deps."""
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+    return DocumentConverter, PdfFormatOption, InputFormat, PdfPipelineOptions
 
 
 @dataclass
@@ -243,6 +249,7 @@ def parse_pdf(path: Path, config: ParserConfig | None = None, manifest: dict[str
         config: Parser configuration
         manifest: Optional manifest dict for fast metadata lookup
     """
+    DocumentConverter, PdfFormatOption, InputFormat, PdfPipelineOptions = _import_docling()
     config = config or ParserConfig()
     file_hash = compute_file_hash(path)
     

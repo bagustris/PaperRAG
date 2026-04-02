@@ -63,7 +63,9 @@ PDF Files
 
 ### `llm.py` -- LLM Integration
 
-- Local Ollama inference via OpenAI-compatible API
+- Supports two local backends:
+  - Ollama for standard model names such as `qwen2.5:1.5b`
+  - `llama.cpp` via `llama-server` for local `.gguf` files and HuggingFace GGUF repos
 - Streaming responses with citation support
 - Descriptive error messages for common LLM failures
 
@@ -77,14 +79,17 @@ PDF Files
 ### `cli.py` -- CLI
 
 - Typer-based command-line interface
-- Commands: `index`, `query`, `evaluate`, plus the default REPL entrypoint
+- Commands: `index`, `review`, `query`, `evaluate`, plus the default REPL entrypoint
 - Rich console output with progress bars (tqdm)
 
 ### `repl.py` -- Interactive REPL
 
 - prompt-toolkit-based interactive session
 - Command history persistence
-- Live settings adjustment (top-k, threshold, temperature, model)
+- Live settings adjustment via slash commands:
+  - `/index`, `/topk`, `/threshold`, `/temperature`
+  - `/max-tokens`, `/ctx-size`, `/prompt`, `/model`
+  - `/config`, `/rc`, `/help`, `/exit`, `/quit`
 
 ### `config.py` -- Configuration
 

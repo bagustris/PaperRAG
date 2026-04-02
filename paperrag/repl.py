@@ -17,7 +17,6 @@ from rich.table import Table
 
 from paperrag import __version__
 from paperrag.config import PaperRAGConfig, load_rc
-from paperrag.parser import discover_pdfs
 
 console = Console()
 
@@ -82,6 +81,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     """Launch the interactive REPL session."""
     cfg = cfg or PaperRAGConfig()
     pdf_dir = Path(cfg.input_dir)
+    from paperrag.parser import discover_pdfs
     
     # Discover PDFs without logging
     import logging

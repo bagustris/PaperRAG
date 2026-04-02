@@ -34,32 +34,67 @@ Speed and memory options:
 
 Best for multiple queries — index is loaded once and reused.
 
-    paperrag -i /path/to/pdfs
+    paperrag -i /path/to/index
 
 REPL commands:
 
 | Command | Description |
 | --- | --- |
 | `<any text>` | Query the indexed papers |
-| `topk <n>` | Set number of retrieved chunks |
-| `threshold <n>` | Set minimum similarity score (0.0–1.0) |
-| `temperature <n>` | Set LLM temperature (0.0–2.0) |
-| `max-tokens <n>` | Set max output tokens |
-| `model <name>` | Switch Ollama model |
-| `config` | Show current settings |
-| `rc` | Show loaded .paperragrc files |
-| `index` | Re-index the PDF directory |
-| `help` | Show all commands |
-| `exit` / `quit` | Exit |
+| `/index` | Re-index the current PDF directory or file |
+| `/index <path>` | Re-index a specific PDF file or directory |
+| `/topk <n>` | Set number of retrieved chunks |
+| `/threshold <n>` | Set minimum similarity score (0.0–1.0) |
+| `/temperature <n>` | Set LLM temperature (0.0–2.0) |
+| `/max-tokens <n>` | Set max output tokens |
+| `/ctx-size <n>` | Set LLM context window size |
+| `/prompt <text>` | Set the system prompt |
+| `/model <name>` | Switch the active model/backend |
+| `/config` | Show current settings |
+| `/rc` | Show loaded `.paperragrc` files |
+| `/help` | Show all commands |
+| `/exit` / `/quit` | Exit |
+
+------------------------------------------------------------------------
+
+## Review Command
+
+Use `review` for a focused workflow on one paper or one directory:
+
+    paperrag review /path/to/paper.pdf
+    paperrag review /path/to/papers --max-tokens 512
+
+This command:
+
+- Derives an index path automatically if `--index-dir` is not provided
+- Runs indexing first
+- Skips unchanged PDFs using SHA256 file hashes
+- Starts the interactive REPL immediately after indexing
+
+Default index location:
+
+- Directory input: `<input-dir>/.paperrag-index`
+- Single PDF input: `<pdf-parent-dir>/.paperrag-index`
 
 ------------------------------------------------------------------------
 
 ## Query Command (Single Questions)
 
-    paperrag query "what is speech chain?" -i /path/to/pdfs
-    paperrag query "what is speech chain?" -i /path/to/pdfs --topk 5
+    paperrag query "what is speech chain?" -i /path/to/index
+    paperrag query "what is speech chain?" -i /path/to/index --topk 5
 
 Note: each invocation reloads the index. Use REPL for multiple queries.
+
+LLM backend examples:
+
+    # Ollama
+    paperrag query "summarize the paper" -i /path/to/index -m qwen2.5:1.5b
+
+    # llama.cpp with local GGUF
+    paperrag query "summarize the paper" -i /path/to/index -m ./models/model.gguf
+
+    # llama.cpp with HuggingFace GGUF repo
+    paperrag query "summarize the paper" -i /path/to/index -m Qwen/Qwen3-1.7B-GGUF
 
 ------------------------------------------------------------------------
 
@@ -72,7 +107,7 @@ index-dir = "/path/to/my-index"
 input-dir = "/path/to/pdfs"
 model = "qwen2.5:1.5b"
 topk = 2
-max-tokens = 128
+max-tokens = 256
 temperature = 0.0
 threshold = 0.1
 ```
@@ -120,7 +155,7 @@ paperrag/
     embedder.py      # Sentence-transformer embeddings
     vectorstore.py   # FAISS vector store
     retriever.py     # Retrieval + re-ranking
-    llm.py           # LLM integration (Ollama)
+    llm.py           # LLM integration (Ollama + llama.cpp)
     parallel.py      # Parallel indexing with worker management
 ```
 

@@ -5,14 +5,29 @@
 ### Prerequisites
 
 - Python 3.11 or later
-- [Ollama](https://ollama.com) for local LLM inference
+- `uv` for environment management
+- One local LLM backend:
+  - [Ollama](https://ollama.com) for model names like `qwen2.5:1.5b`
+  - `llama-server` from `llama.cpp` for local `.gguf` models or HuggingFace GGUF repos
 
-### Install with uv (recommended)
+### Install with uv (recommended, CPU-only default)
+
+```bash
+uv sync
+```
+
+To run commands without activating the environment:
+
+```bash
+uv run paperrag --help
+```
+
+If you prefer an editable install with `uv pip`:
 
 ```bash
 uv venv --python 3.11
 source .venv/bin/activate
-uv pip install -e ".[llm]"
+uv pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -e .
 ```
 
 ### Install with pip
@@ -20,10 +35,22 @@ uv pip install -e ".[llm]"
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[llm]"
+pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -e .
 ```
 
-The `llm` extra includes `transformers` and `accelerate` for additional LLM support.
+### Optional LLM extras
+
+If you want HuggingFace GGUF download support, install:
+
+```bash
+uv pip install huggingface-hub
+```
+
+If you want additional Transformers-based tooling outside the default PaperRAG flow:
+
+```bash
+uv pip install transformers accelerate
+```
 
 ## Indexing PDFs
 
@@ -69,17 +96,28 @@ paperrag index --workers 10
 The REPL loads the index once and lets you ask multiple questions:
 
 ```bash
-paperrag --index-dir /path/to/pdfs -m qwen3:1.7b
+paperrag --index-dir /path/to/index -m qwen2.5:1.5b
 ```
 
-Inside the REPL, type any question to query your papers. Use `help` to see all available commands.
+Inside the REPL, type any question to query your papers. Use `/help` to see all available commands.
+
+### Focused Review Mode
+
+For one paper or one directory, `review` runs indexing first and then opens the REPL:
+
+```bash
+paperrag review /path/to/paper.pdf
+paperrag review /path/to/papers --max-tokens 512
+```
+
+If the file hash is unchanged in the target index, PaperRAG skips re-indexing automatically.
 
 ### One-off Query
 
 For single questions or scripting:
 
 ```bash
-paperrag query "what is speech chain?" --index-dir /path/to/pdfs -m qwen3:1.7b
+paperrag query "what is speech chain?" --index-dir /path/to/index -m qwen2.5:1.5b
 ```
 
 ## REPL Commands
@@ -89,20 +127,47 @@ Once inside the REPL, these commands are available:
 | Command | Description |
 |---------|-------------|
 | `<any text>` | Query the indexed papers |
-| `index` | Re-index the PDF directory |
-| `topk <n>` | Set top-k for retrieval (default: 3) |
-| `threshold <n>` | Set similarity threshold (0.0-1.0) |
-| `temperature <n>` | Set LLM temperature (0.0-2.0) |
-| `model <name>` | Switch LLM model |
-| `config` | Show current configuration |
-| `help` | Show help |
-| `exit` / `quit` | Exit the REPL |
+| `/index` | Re-index the current PDF directory or file |
+| `/index <path>` | Re-index a specific PDF file or directory |
+| `/topk <n>` | Set top-k for retrieval |
+| `/threshold <n>` | Set similarity threshold (0.0-1.0) |
+| `/temperature <n>` | Set LLM temperature (0.0-2.0) |
+| `/max-tokens <n>` | Set max output tokens |
+| `/ctx-size <n>` | Set LLM context window size |
+| `/prompt <text>` | Set the system prompt |
+| `/model <name>` | Switch the active model/backend |
+| `/config` | Show current configuration |
+| `/rc` | Show loaded `.paperragrc` files and values |
+| `/help` | Show help |
+| `/exit` / `/quit` | Exit the REPL |
 
 ## LLM Setup
+
+### Ollama backend
 
 Install Ollama from <https://ollama.com>, then:
 
 ```bash
-ollama pull qwen3:1.7b
-paperrag --index-dir /path/to/index -m qwen3:1.7b
+ollama pull qwen2.5:1.5b
+paperrag --index-dir /path/to/index -m qwen2.5:1.5b
+```
+
+### llama.cpp backend
+
+Install `llama-server` from `llama.cpp`:
+
+```bash
+brew install llama-cpp
+```
+
+Then either use a local GGUF file:
+
+```bash
+paperrag --index-dir /path/to/index -m /path/to/model.gguf
+```
+
+Or a HuggingFace GGUF repo ID:
+
+```bash
+paperrag --index-dir /path/to/index -m Qwen/Qwen3-1.7B-GGUF
 ```

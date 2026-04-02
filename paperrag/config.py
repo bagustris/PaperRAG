@@ -204,7 +204,7 @@ class LLMConfig(BaseModel):
         "Be concise and direct."
     )
     temperature: float = 0.0
-    max_tokens: int = 128
+    max_tokens: int = 256
     ctx_size: int = Field(
         default=2048,
         ge=512,

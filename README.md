@@ -34,11 +34,37 @@ Download from https://ollama.com, then pull the recommended model:
 
 CPU-only (default, recommended):
 
-    uv pip install -e .
+    uv sync
 
-With GPU/CUDA support (NVIDIA GPU):
+CPU-only editable install:
 
-    uv pip install -e ".[gpu]"
+    uv pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -e .
+
+GPU/CUDA support for pure uv:
+
+    uv sync
+    uv pip install --reinstall torch --index-url https://download.pytorch.org/whl/cu124
+
+pip CPU editable install:
+
+    pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -e .
+
+uv pip CPU editable install:
+
+    uv pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -e .
+
+pip GPU editable install (CUDA 12.4):
+
+    pip install --index-url https://download.pytorch.org/whl/cu124 --extra-index-url https://pypi.org/simple -e .
+
+uv pip GPU editable install (CUDA 12.4):
+
+    uv pip install --index-url https://download.pytorch.org/whl/cu124 --extra-index-url https://pypi.org/simple -e .
+
+Note: `pip install -e ".[gpu]"` cannot by itself switch PyTorch from CPU to CUDA
+reliably, because PyTorch CPU and CUDA wheels come from different indexes, and
+`pip` does not read `tool.uv.sources`. The index has to be selected on the
+command line for `pip` and `uv pip`. Pure `uv sync` remains CPU-only by design.
 
 ------------------------------------------------------------------------
 
@@ -93,7 +119,7 @@ Retrieval: 0.05s | LLM: 8.65s | Total: 8.69s
 | `--topk, -k` | `2` | Chunks to retrieve |
 | `--threshold, -t` | `0.1` | Minimum similarity score |
 | `--temperature` | `0.0` | LLM temperature (0=deterministic) |
-| `--max-tokens` | `128` | Max output tokens |
+| `--max-tokens` | `256` | Max output tokens |
 
 ------------------------------------------------------------------------
 
