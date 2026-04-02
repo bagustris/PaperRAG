@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [XX.YY.ZZ: Major.Minor.Patch] - YYYY-MM-DD  
 
+## [0.4.1] - 2026-04-02
+- Added /ctx-size command to REPL to show current context size of the index (keep backward compatibility with older versions of the index  via n-ctx)
+
+## [0.4.0] - 2026-04-01
+- Added review mode (REPL) for interactive querying and testing of the index 
+
 ## [0.3.1] - 2026-02-18  
 - Added Sources, removed References in REPL 
 - Auto-detect GPU 

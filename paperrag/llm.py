@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _client_cache: object | None = None
 _model_checked: set[str] = set()
 
-# llama-server process and client caches (keyed by (model_path, n_ctx, n_gpu_layers))
+# llama-server process and client caches (keyed by (model_path, ctx_size, n_gpu_layers))
 _llama_server_procs: dict[tuple, subprocess.Popen] = {}
 _llama_server_clients: dict[tuple, object] = {}
 
@@ -63,13 +63,6 @@ def _cleanup_llama_servers() -> None:
 
 
 atexit.register(_cleanup_llama_servers)
-
-SYSTEM_PROMPT = (
-    "You are a helpful research assistant. "
-    "Answer strictly using the provided context. "
-    "If the answer is not in context, respond: 'I don't know.' "
-    "Be concise and direct."
-)
 
 # Maximum characters per context chunk sent to the LLM.
 # Longer chunks are truncated to keep prompt size manageable for small models.
@@ -294,11 +287,11 @@ def _wait_for_llama_server(port: int, timeout: float = 120.0) -> bool:
     return False
 
 
-def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -> object:
+def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int) -> object:
     """Return a cached OpenAI client connected to a running ``llama-server``.
 
     Starts a new ``llama-server`` process on a free port if none is cached for
-    the given ``(model_path, n_ctx, n_gpu_layers)`` combination, or if the
+    the given ``(model_path, ctx_size, n_gpu_layers)`` combination, or if the
     previously started process has exited unexpectedly.
 
     The server process is registered with :func:`atexit` and terminated when
@@ -308,7 +301,7 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
     """
     from openai import OpenAI
 
-    cache_key = (model_path, n_ctx, n_gpu_layers)
+    cache_key = (model_path, ctx_size, n_gpu_layers)
 
     # Re-use existing server if still alive
     if cache_key in _llama_server_clients:
@@ -333,7 +326,7 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
             llama_server,
             "--model", model_path,
             "--port", str(port),
-            "--ctx-size", str(n_ctx),
+            "--ctx-size", str(ctx_size),
             "--n-gpu-layers", str(n_gpu_layers),
             "--parallel", "1",
         ]
@@ -404,7 +397,7 @@ def _get_or_start_llama_server(model_path: str, n_ctx: int, n_gpu_layers: int) -
 # ---------------------------------------------------------------------------
 
 
-def _build_messages(question: str, context_chunks: list[str], model_name: str) -> list[dict]:
+def _build_messages(question: str, context_chunks: list[str], model_name: str, system_prompt: str) -> list[dict]:
     """Build the chat messages list from question, context chunks, and model name."""
     user_prompt = _build_prompt(question, context_chunks)
 
@@ -416,7 +409,7 @@ def _build_messages(question: str, context_chunks: list[str], model_name: str) -
         user_prompt += " /no_think"
 
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
 
@@ -430,7 +423,7 @@ def _prepare(
     global _client_cache
     from openai import OpenAI
 
-    messages = _build_messages(question, context_chunks, config.model_name)
+    messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt)
 
     if _client_cache is not None:
         client = _client_cache
@@ -489,8 +482,8 @@ def generate_answer(
 
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
-        client = _get_or_start_llama_server(model_path, config.n_ctx, config.n_gpu_layers)
-        messages = _build_messages(question, context_chunks, config.model_name)
+        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers)
+        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt)
         logger.info(
             "Calling llama-server (model=%s, temp=%.2f)", config.model_name, config.temperature
         )
@@ -514,7 +507,7 @@ def generate_answer(
         messages=messages,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
-        extra_body={"num_ctx": config.n_ctx, "keep_alive": "30m"},
+        extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -546,8 +539,8 @@ def stream_answer(
 
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
-        client = _get_or_start_llama_server(model_path, config.n_ctx, config.n_gpu_layers)
-        messages = _build_messages(question, context_chunks, config.model_name)
+        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers)
+        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt)
         logger.info(
             "Calling llama-server streaming (model=%s, temp=%.2f)",
             config.model_name,
@@ -579,7 +572,7 @@ def stream_answer(
         temperature=config.temperature,
         max_tokens=config.max_tokens,
         stream=True,
-        extra_body={"num_ctx": config.n_ctx, "keep_alive": "30m"},
+        extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
     )
     for chunk in response:
         delta = chunk.choices[0].delta.content

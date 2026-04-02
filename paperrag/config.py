@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 _rc_logger = logging.getLogger(__name__)
 
@@ -21,7 +21,8 @@ _RC_KEY_MAP: dict[str, tuple[str, type]] = {
     "threshold": ("retriever.score_threshold", float),
     "index-dir": ("index_dir", str),
     "input-dir": ("input_dir", str),
-    "n-ctx": ("llm.n_ctx", int),
+    "ctx-size": ("llm.ctx_size", int),
+    "system-prompt": ("llm.system_prompt", str),
     "n-gpu-layers": ("llm.n_gpu_layers", int),
 }
 
@@ -196,11 +197,18 @@ class LLMConfig(BaseModel):
     model_config = {"extra": "ignore"}  # tolerate old snapshots with api_base/api_key
 
     model_name: str = "qwen2.5:1.5b"
+    system_prompt: str = (
+        "You are a helpful research assistant. "
+        "Answer strictly using the provided context. "
+        "If the answer is not in context, respond: 'I don't know.' "
+        "Be concise and direct."
+    )
     temperature: float = 0.0
     max_tokens: int = 128
-    n_ctx: int = Field(
+    ctx_size: int = Field(
         default=2048,
         ge=512,
+        validation_alias=AliasChoices("ctx_size", "n_ctx"),
         description=(
             "Context window size. "
             "For llama.cpp (GGUF models via llama-server) this sets --ctx-size. "

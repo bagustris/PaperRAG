@@ -20,6 +20,7 @@ dependencies = [
     "pymupdf>=1.23",  # For PDF text detection
     "prompt-toolkit>=3.0",  # For REPL command history
     "openai>=1.0,<2.0",
+    "pytest>=9.0.2",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +52,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["paperrag"]
+
+[tool.pytest.ini_options]
+# Filter out known third-party warnings from SWIG/Faiss
+filterwarnings = [
+    "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+]
 
 # CPU-only torch is the default (avoids ~2.5GB CUDA download).
 # Install with GPU/CUDA support: uv pip install -e ".[gpu]"

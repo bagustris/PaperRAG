@@ -28,6 +28,8 @@ SLASH_COMMANDS: list[str] = [
     "/threshold",
     "/temperature",
     "/max-tokens",
+    "/ctx-size",
+    "/prompt",
     "/model",
     "/config",
     "/rc",
@@ -45,6 +47,8 @@ HELP_TEXT = """\
   [cyan]/threshold <n>[/cyan]          Set similarity threshold 0.0-1.0 (default: 0.15)
   [cyan]/temperature <n>[/cyan]        Set LLM temperature 0.0-2.0 (default: 0.0)
   [cyan]/max-tokens <n>[/cyan]         Set LLM max output tokens (default: 256)
+  [cyan]/ctx-size <n>[/cyan]           Set LLM context window size (default: 2048)
+  [cyan]/prompt <text>[/cyan]          Set LLM system prompt
   [cyan]/model <name>[/cyan]           Set LLM model name
   [cyan]/config[/cyan]                 Show current configuration
   [cyan]/rc[/cyan]                     Show loaded .paperragrc files and values
@@ -130,6 +134,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     console.print(f"Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan] (minimum similarity score)")
     console.print(f"Temperature: [cyan]{cfg.llm.temperature}[/cyan] (0.0=deterministic, higher=creative)")
     console.print(f"Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan] (max output length)")
+    console.print(f"Context size: [cyan]{cfg.llm.ctx_size}[/cyan] (LLM context window)")
 
     console.print("Type [cyan]/help[/cyan] for commands, or [cyan]/[/cyan] + Tab for autocomplete.\n")
 
@@ -234,6 +239,26 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
                 console.print("[yellow]Usage: /max-tokens <number>[/yellow]")
             continue
 
+        if cmd_parts[0] == "/ctx-size":
+            if len(cmd_parts) == 2 and cmd_parts[1].isdigit():
+                val = int(cmd_parts[1])
+                if val >= 512:
+                    cfg.llm.ctx_size = val
+                    console.print(f"Context size set to [cyan]{cfg.llm.ctx_size}[/cyan]")
+                else:
+                    console.print("[yellow]Context size must be at least 512[/yellow]")
+            else:
+                console.print("[yellow]Usage: /ctx-size <number>[/yellow]")
+            continue
+
+        if cmd_parts[0] == "/prompt":
+            if len(cmd_parts) == 2:
+                cfg.llm.system_prompt = cmd_parts[1].strip()
+                console.print(f"System prompt set to: [dim]{cfg.llm.system_prompt}[/dim]")
+            else:
+                console.print("[yellow]Usage: /prompt <text>[/yellow]")
+            continue
+
         if cmd_parts[0] == "/model":
             if len(cmd_parts) == 2:
                 cfg.llm.model_name = cmd_parts[1]
@@ -248,6 +273,8 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print(f"  Model: [cyan]{cfg.llm.model_name}[/cyan]")
             console.print(f"  Temperature: [cyan]{cfg.llm.temperature}[/cyan]")
             console.print(f"  Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan]")
+            console.print(f"  Context size: [cyan]{cfg.llm.ctx_size}[/cyan]")
+            console.print(f"  System prompt: [dim]{cfg.llm.system_prompt}[/dim]")
             console.print("[bold]Retrieval:[/bold]")
             console.print(f"  Top-k: [cyan]{top_k}[/cyan]")
             console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]\n")

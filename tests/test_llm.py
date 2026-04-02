@@ -113,21 +113,30 @@ def test_is_llama_backend_bare_ollama():
 
 
 def test_build_messages_structure():
-    msgs = _build_messages("What is X?", ["Some context about X."], "llama3")
+    prompt = "You are a research assistant."
+    msgs = _build_messages("What is X?", ["Some context about X."], "llama3", prompt)
     assert len(msgs) == 2
     assert msgs[0]["role"] == "system"
+    assert msgs[0]["content"] == prompt
     assert msgs[1]["role"] == "user"
     assert "What is X?" in msgs[1]["content"]
 
 
 def test_build_messages_qwen3_no_think():
-    msgs = _build_messages("Q?", ["ctx"], "qwen3:1.7b")
+    msgs = _build_messages("Q?", ["ctx"], "qwen3:1.7b", "System")
     assert msgs[1]["content"].endswith("/no_think")
 
 
 def test_build_messages_non_qwen3_no_trailing_no_think():
-    msgs = _build_messages("Q?", ["ctx"], "llama3")
+    msgs = _build_messages("Q?", ["ctx"], "llama3", "System")
     assert not msgs[1]["content"].endswith("/no_think")
+
+
+def test_build_messages_custom_prompt():
+    custom = "You are a pirate."
+    msgs = _build_messages("Q?", ["ctx"], "llama3", custom)
+    assert msgs[0]["content"] == custom
+
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +200,7 @@ def test_generate_answer_llama_server_mocked(tmp_path):
         result = generate_answer("What?", ["some context"], cfg)
 
     assert result == "answer text"
-    mock_start.assert_called_once_with(str(model_file), cfg.n_ctx, cfg.n_gpu_layers)
+    mock_start.assert_called_once_with(str(model_file), cfg.ctx_size, cfg.n_gpu_layers)
 
 
 def test_generate_answer_hf_model_mocked():

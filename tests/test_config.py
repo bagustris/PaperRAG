@@ -13,16 +13,38 @@ def test_default_config():
     assert cfg.embedder.model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert cfg.retriever.top_k == 2
     assert cfg.llm.temperature == 0.0
+    assert cfg.llm.ctx_size == 2048
+    assert "research assistant" in cfg.llm.system_prompt
 
 
 def test_snapshot_roundtrip(tmp_path):
     cfg = PaperRAGConfig()
+    cfg.llm.ctx_size = 4096
+    cfg.llm.system_prompt = "Custom prompt"
     path = tmp_path / "snap.json"
     cfg.save_snapshot(path)
 
     loaded = PaperRAGConfig.load_snapshot(path)
     assert loaded.chunker.chunk_size == cfg.chunker.chunk_size
     assert loaded.embedder.model_name == cfg.embedder.model_name
+    assert loaded.llm.ctx_size == 4096
+    assert loaded.llm.system_prompt == "Custom prompt"
+
+
+def test_legacy_snapshot_migration(tmp_path):
+    """Verify that old snapshots with 'n_ctx' migrate correctly to 'ctx_size'."""
+    legacy_data = {
+        "llm": {
+            "model_name": "test-model",
+            "n_ctx": 1024
+        }
+    }
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(legacy_data))
+
+    cfg = PaperRAGConfig.load_snapshot(path)
+    assert cfg.llm.model_name == "test-model"
+    assert cfg.llm.ctx_size == 1024
 
 
 def test_snapshot_is_json_serialisable():

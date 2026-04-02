@@ -101,6 +101,8 @@ def entrypoint(
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0, default: 0.15)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
     max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
+    ctx_size: int = typer.Option(None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"),
+    system_prompt: str = typer.Option(None, "--system-prompt", "--prompt", help="LLM system prompt"),
 ) -> None:
     """PaperRAG - local RAG for academic PDFs."""
     if ctx.invoked_subcommand is None:
@@ -173,6 +175,12 @@ def entrypoint(
 
         if max_tokens is not None:
             cfg.llm.max_tokens = max_tokens
+
+        if ctx_size is not None:
+            cfg.llm.ctx_size = ctx_size
+
+        if system_prompt:
+            cfg.llm.system_prompt = system_prompt
 
         _print_gpu_info()
         start_repl(cfg)
@@ -505,6 +513,8 @@ def review(
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
     max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
+    ctx_size: int = typer.Option(None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"),
+    system_prompt: str = typer.Option(None, "--system-prompt", "--prompt", help="LLM system prompt"),
 ) -> None:
     """Index a PDF file (or directory) and start an interactive review session.
 
@@ -552,6 +562,10 @@ def review(
         cfg.llm.temperature = temperature
     if max_tokens is not None:
         cfg.llm.max_tokens = max_tokens
+    if ctx_size is not None:
+        cfg.llm.ctx_size = ctx_size
+    if system_prompt:
+        cfg.llm.system_prompt = system_prompt
 
     # Validate that PDFs can be found before indexing
     from paperrag.parser import discover_pdfs
@@ -581,6 +595,8 @@ def query(
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
     temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
     max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
+    ctx_size: int = typer.Option(None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"),
+    system_prompt: str = typer.Option(None, "--system-prompt", "--prompt", help="LLM system prompt"),
     input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (required)"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
@@ -632,6 +648,12 @@ def query(
 
     if max_tokens is not None:
         cfg.llm.max_tokens = max_tokens
+
+    if ctx_size is not None:
+        cfg.llm.ctx_size = ctx_size
+
+    if system_prompt:
+        cfg.llm.system_prompt = system_prompt
 
     try:
         retriever = Retriever(cfg)
