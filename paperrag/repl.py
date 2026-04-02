@@ -21,17 +21,18 @@ console = Console()
 
 HELP_TEXT = """\
 [bold]Available commands:[/bold]
-  [cyan]<any text>[/cyan]       Query the indexed papers (uses top-k retrieval + LLM)
-  [cyan]index[/cyan]            Re-index the PDF directory
-  [cyan]topk <n>[/cyan]         Set top-k for retrieval (default: 3)
-  [cyan]threshold <n>[/cyan]    Set similarity threshold 0.0-1.0 (default: 0.15)
-  [cyan]temperature <n>[/cyan]  Set LLM temperature 0.0-2.0 (default: 0.0)
-  [cyan]max-tokens <n>[/cyan]   Set LLM max output tokens (default: 256)
-  [cyan]model <name>[/cyan]     Set LLM model name
-  [cyan]config[/cyan]           Show current configuration
-  [cyan]rc[/cyan]               Show loaded .paperragrc files and values
-  [cyan]help[/cyan]             Show this help message
-  [cyan]exit[/cyan] / [cyan]quit[/cyan]      Exit the REPL
+  [cyan]<any text>[/cyan]            Query the indexed papers (uses top-k retrieval + LLM)
+  [cyan]index[/cyan]                 Re-index the current PDF directory/file
+  [cyan]index <path>[/cyan]          Re-index a specific PDF file or directory
+  [cyan]topk <n>[/cyan]              Set top-k for retrieval (default: 3)
+  [cyan]threshold <n>[/cyan]         Set similarity threshold 0.0-1.0 (default: 0.15)
+  [cyan]temperature <n>[/cyan]       Set LLM temperature 0.0-2.0 (default: 0.0)
+  [cyan]max-tokens <n>[/cyan]        Set LLM max output tokens (default: 256)
+  [cyan]model <name>[/cyan]          Set LLM model name
+  [cyan]config[/cyan]                Show current configuration
+  [cyan]rc[/cyan]                    Show loaded .paperragrc files and values
+  [cyan]help[/cyan]                  Show this help message
+  [cyan]exit[/cyan] / [cyan]quit[/cyan]           Exit the REPL
 """
 
 
@@ -129,7 +130,15 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print(HELP_TEXT)
             continue
 
-        if command == "index":
+        cmd_parts = command.split(maxsplit=1)
+        if cmd_parts[0] == "index":
+            if len(cmd_parts) == 2:
+                new_path = cmd_parts[1].strip()
+                path_obj = Path(new_path)
+                if not path_obj.exists():
+                    console.print(f"[red]Path does not exist: {new_path}[/red]")
+                    continue
+                cfg.input_dir = str(path_obj)
             _handle_index(cfg)
             retriever = None  # force reload after re-index
             continue
