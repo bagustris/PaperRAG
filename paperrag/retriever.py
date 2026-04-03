@@ -200,15 +200,17 @@ class Retriever:
     
     def _rerank_by_paper(self, results: list[RetrievalResult]) -> list[RetrievalResult]:
         """Limit results per paper to avoid over-representation.
-        
+
         Ensures diversity by limiting how many chunks from same paper.
+        Groups by file_path (not paper_title) to handle papers with failed
+        title extraction that all share the "Unknown" placeholder.
         """
         max_per_paper = self.config.retriever.max_results_per_paper
         paper_counts: dict[str, int] = {}
         filtered: list[RetrievalResult] = []
-        
+
         for result in results:
-            paper = result.paper_title
+            paper = result.file_path
             count = paper_counts.get(paper, 0)
             
             if count < max_per_paper:

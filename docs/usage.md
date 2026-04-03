@@ -68,9 +68,9 @@ Use `review` for a focused workflow on one paper or one directory:
 This command:
 
 - Derives an index path automatically if `--index-dir` is not provided
-- Runs indexing first
-- Skips unchanged PDFs using SHA256 file hashes
+- Checks for new or changed PDFs using SHA256 file hashes; prints `Index is up-to-date.` if nothing changed
 - Starts the interactive REPL immediately after indexing
+- **Single PDF:** automatically focuses queries on that paper at startup. If the index contains other papers, a hint is shown: `/focus list` to browse, `/focus` to search all
 
 Default index location:
 

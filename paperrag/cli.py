@@ -577,15 +577,11 @@ def review(
     _print_gpu_info()
 
     # Step 1: Index the content
-    if path_obj.is_file():
-        console.print(f"[bold]Indexing:[/bold] [cyan]{path_obj.name}[/cyan]")
-    else:
-        console.print(f"[bold]Indexing:[/bold] [cyan]{path_obj}[/cyan]")
     _handle_index(cfg)
 
-    # Step 2: Start interactive review session
-    console.print()
-    start_repl(cfg)
+    # Step 2: Start interactive review session (auto-focus when reviewing a single PDF)
+    auto_focus = pdfs[0] if len(pdfs) == 1 else None
+    start_repl(cfg, auto_focus=auto_focus)
 
 
 @app.command()

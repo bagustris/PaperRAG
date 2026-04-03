@@ -80,10 +80,21 @@ Default index location:
 - Directory input: `<input-dir>/.paperrag-index`
 - Single PDF input: `<pdf-parent-dir>/.paperrag-index`
 
+**Single-PDF behaviour:** when a single PDF is passed, the REPL starts with queries automatically
+focused on that paper. If the index contains other papers (e.g. previously indexed alongside it),
+a one-line hint is shown:
+
+```
+Auto-focused on 'paper.pdf'
+2 other paper(s) also indexed — /focus list to browse, /focus to search all
+```
+
+Use `/focus` (no argument) at any time to remove the filter and search across all indexed papers.
+
 Examples:
 
 ```bash
-# Review one paper using the parent directory index
+# Review one paper — REPL auto-focuses on it
 paperrag review ~/papers/paper.pdf
 
 # Review a whole directory and increase answer length

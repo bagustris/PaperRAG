@@ -79,7 +79,7 @@ class _SlashCompleter(Completer):
                 # Yield the remainder so it appends to what's already typed
                 yield Completion(cmd[len(word):], start_position=0, display=cmd)
 
-def start_repl(cfg: PaperRAGConfig | None = None) -> None:
+def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" = None) -> None:
     """Launch the interactive REPL session."""
     cfg = cfg or PaperRAGConfig()
     pdf_dir = Path(cfg.input_dir)
@@ -90,8 +90,10 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     parser_logger = logging.getLogger('paperrag.parser')
     original_level = parser_logger.level
     parser_logger.setLevel(logging.WARNING)  # Suppress INFO logs temporarily
-    pdfs = discover_pdfs(pdf_dir)
-    parser_logger.setLevel(original_level)  # Restore original level
+    try:
+        pdfs = discover_pdfs(pdf_dir)
+    finally:
+        parser_logger.setLevel(original_level)  # Always restore log level
 
     console.print(f"\n[bold]PaperRAG[/bold] version [cyan]{__version__}[/cyan]")
 
@@ -151,6 +153,26 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         console.print("[green]Ready[/green]")
     else:
         console.print("[red]Failed[/red]")
+
+    # Auto-focus for single-PDF review sessions
+    if auto_focus is not None and retriever is not None:
+        all_files = sorted(list(retriever.store.file_hashes.keys()))
+        matches = [f for f in all_files if Path(f).name.lower() == auto_focus.name.lower()]
+        if matches:
+            focused_file = matches[0]
+            console.print(f"[green]Auto-focused on '{auto_focus.name}'[/green]")
+            other_count = len(all_files) - 1
+            if other_count > 0:
+                console.print(
+                    f"[dim]{other_count} other paper(s) also indexed — "
+                    f"/focus list to browse, /focus to search all[/dim]"
+                )
+        else:
+            console.print(
+                f"[yellow]Warning: '{auto_focus.name}' not found in index — "
+                f"searching all papers[/yellow]"
+            )
+        console.print()
 
     # Suppress INFO logs during interactive session to keep output clean.
     logging.getLogger().setLevel(logging.WARNING)
@@ -336,7 +358,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print(f"  Context size: [cyan]{cfg.llm.ctx_size}[/cyan]")
             console.print(f"  System prompt: [dim]{cfg.llm.system_prompt}[/dim]")
             console.print("[bold]Retrieval:[/bold]")
-            console.print(f"  Top-k: [cyan]{top_k}[/cyan]")
+            console.print(f"  Top-k: [cyan]{cfg.retriever.top_k}[/cyan]")
             console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]")
             if focused_file:
                 console.print(f"  Focus: [green]{Path(focused_file).name}[/green]\n")
@@ -494,7 +516,10 @@ def _handle_index(cfg: PaperRAGConfig) -> None:
 
     # Determine which files need (re)indexing - use parallel hashing
     n_workers = cfg.indexing.get_n_workers()
-    console.print(f"Computing hashes for {len(pdfs)} PDFs...")
+    if len(pdfs) == 1:
+        console.print(f"Checking [cyan]{pdfs[0].name}[/cyan] for changes...")
+    else:
+        console.print(f"Checking [cyan]{len(pdfs)}[/cyan] PDFs for changes...")
     pdf_hashes = compute_file_hashes_parallel(pdfs, n_workers)
 
     to_index: list[Path] = []

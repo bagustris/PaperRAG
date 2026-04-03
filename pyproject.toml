@@ -1,6 +1,6 @@
 [project]
 name = "paperrag"
-version = "0.4.3"
+version = "0.5.0"
 description = "Local RAG for academic PDFs"
 authors = [{name = "PaperRAG Team"}]
 readme = "README.md"
