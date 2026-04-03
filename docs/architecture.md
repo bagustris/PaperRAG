@@ -114,3 +114,31 @@ The index is checkpointed after every batch during indexing. If the process cras
 ### Spawn Multiprocessing
 
 PaperRAG forces the `spawn` multiprocessing start method to avoid deadlocks caused by forking processes that use PyTorch, CUDA, or OpenMP.
+
+## Design Principles
+
+These principles guide decisions about UX, API shape, and feature scope.
+
+### Progressive Disclosure
+
+Default behaviour is minimal; complexity surfaces only when the user needs it. Running `paperrag review paper.pdf` requires zero flags. The `/focus`, `/topk`, and `/config` commands exist for users who want more control, but they are never required. New features should follow the same pattern: sensible default first, opt-in complexity second.
+
+### Convention over Configuration
+
+The index location auto-derives from the input path (`<input-dir>/.paperrag-index`). Workers auto-detect from available RAM. The LLM backend is inferred from the model name format (Ollama name vs. `.gguf` path vs. HuggingFace repo ID). `.paperragrc` files are optional overrides, not required setup. A new user should be able to run a useful command without reading the configuration docs.
+
+### Incremental by Default
+
+Re-running any command is always safe and cheap. SHA-256 hashes mean unchanged PDFs are skipped automatically during indexing — no `--skip-cached` flag needed. This principle extends to index saves (atomic writes via `.tmp` + move) and REPL state (re-indexing only resets what changed).
+
+### Ownership of Output
+
+Each layer is responsible for its own console output. `_handle_index` prints its own progress; the `review` command does not pre-announce what `_handle_index` is about to say. Functions that call other functions do not narrate on their behalf. This keeps output coherent and prevents duplicate or contradictory messages as the codebase grows.
+
+### Local-First, No Cloud Dependencies
+
+Everything runs on-device: FAISS (embedded library, no server), Ollama or llama-server (local inference), sentence-transformers (downloaded once, cached). The design treats offline use as the default, not an edge case. Features that require external services should be clearly opt-in.
+
+### Atomic Persistence
+
+The vector store writes to a `.tmp` file and then uses `shutil.move()` to replace the live index. A crash mid-save leaves the previous index intact. The same principle applies to batch checkpointing during indexing: partial progress is always recoverable.

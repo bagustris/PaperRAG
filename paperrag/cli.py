@@ -96,7 +96,7 @@ def entrypoint(
     version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True, help="Show version and license"),
     input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file to index"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (will auto-discover .paperrag-index subdirectory if needed)"),
-    topk: int = typer.Option(None, "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
+    topk: int = typer.Option(None, "--top-k", "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0, default: 0.15)"),
     temperature: float = typer.Option(None, "--temperature", "--temp", help="LLM temperature (0.0-2.0, default: 0.0)"),
@@ -119,15 +119,20 @@ def entrypoint(
         # Resolve effective index_dir: CLI arg takes priority over RC
         effective_index_dir = index_dir or cfg._index_dir
 
-        # REPL mode requires index_dir (from CLI or .paperragrc)
-        if not effective_index_dir:
-            console.print("[red]Error: --index-dir is required for REPL mode[/red]")
-            console.print("Usage: paperrag --index-dir <path> [options]")
-            console.print("[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]")
-            raise typer.Exit(1)
-
-        # Auto-discover index location
+        # Auto-discover index from CWD if no explicit index_dir given
         from paperrag.vectorstore import VectorStore
+
+        if not effective_index_dir:
+            cwd = Path.cwd()
+            for candidate in [cwd / ".paperrag-index", cwd]:
+                if (candidate / "version.json").exists():
+                    effective_index_dir = str(candidate)
+                    console.print(f"[dim]Using index at {candidate}[/dim]")
+                    break
+            else:
+                console.print("[red]Error: no index found. Pass --index-dir or run paperrag from an indexed folder.[/red]")
+                console.print("[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]")
+                raise typer.Exit(1)
 
         index_path = Path(effective_index_dir).resolve()
 
@@ -509,7 +514,7 @@ def review(
     input_path: str = typer.Argument(..., help="PDF file or directory to review"),
     index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: auto-derived from input path)"),
     model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
-    topk: int = typer.Option(None, "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
+    topk: int = typer.Option(None, "--top-k", "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
     threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
     temperature: float = typer.Option(None, "--temperature", "--temp",  help="LLM temperature (0.0-2.0, default: 0.0)"),
     max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),

@@ -109,16 +109,18 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
     idx_dir = Path(cfg.index_dir)
 
     # Check if index exists and count indexed PDFs
+    loaded_store = None
     if VectorStore.exists(idx_dir):
         try:
-            store = VectorStore.load(idx_dir)
-            indexed_count = len(store.file_hashes)
+            loaded_store = VectorStore.load(idx_dir)
+            indexed_count = len(loaded_store.file_hashes)
             unindexed_count = len(pdfs) - indexed_count
 
             if unindexed_count > 0:
                 console.print(
                     f"Found [green]{len(pdfs)}[/green] PDFs - "
                     f"[yellow]{unindexed_count} unindexed[/yellow]"
+                    f" [dim]— run /index to add them[/dim]"
                 )
             else:
                 console.print(f"Found [green]{len(pdfs)}[/green] PDFs - [green]all indexed[/green]")
@@ -131,15 +133,7 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
         import sys
         sys.exit(1)
 
-    console.print(f"LLM: [cyan]{cfg.llm.model_name}[/cyan]")
-
-    # Display key accuracy parameters
-    console.print(f"Top-k: [cyan]{cfg.retriever.top_k}[/cyan] (retrieve {cfg.retriever.top_k} chunks)")
-    console.print(f"Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan] (minimum similarity score)")
-    console.print(f"Temperature: [cyan]{cfg.llm.temperature}[/cyan] (0.0=deterministic, higher=creative)")
-    console.print(f"Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan] (max output length)")
-    console.print(f"Context size: [cyan]{cfg.llm.ctx_size}[/cyan] (LLM context window)")
-
+    console.print(f"LLM: [cyan]{cfg.llm.model_name}[/cyan]  [dim]top-k={cfg.retriever.top_k} threshold={cfg.retriever.score_threshold} — /config for all settings[/dim]")
     console.print("Type [cyan]/help[/cyan] for commands, or [cyan]/[/cyan] + Tab for autocomplete.\n")
 
     top_k = cfg.retriever.top_k
@@ -147,8 +141,9 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
 
     # Eagerly load the retriever (including embedding model) at startup
     # so the first query doesn't pay the ~6s model-loading penalty.
+    # Pass the already-loaded store to avoid reading the index from disk twice.
     console.print("[dim]Loading embedding model...\n[/dim]", end="")
-    retriever = _ensure_retriever(None, cfg)
+    retriever = _ensure_retriever(None, cfg, store=loaded_store)
     if retriever is not None:
         console.print("[green]Ready[/green]")
     else:
@@ -396,14 +391,14 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
         _handle_query(command, retriever, cfg, top_k=top_k, focused_file=focused_file)
 
 
-def _ensure_retriever(retriever, cfg: PaperRAGConfig):
+def _ensure_retriever(retriever, cfg: PaperRAGConfig, store=None):
     """Lazy-load the retriever, returning None on failure."""
     if retriever is not None:
         return retriever
     try:
         from paperrag.retriever import Retriever
 
-        return Retriever(cfg)
+        return Retriever(cfg, store=store)
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
         return None
@@ -425,7 +420,10 @@ def _handle_query(
     t_retrieval = time.perf_counter() - t0
 
     if not results:
-        console.print("[yellow]No results found.[/yellow]")
+        msg = "[yellow]No results found.[/yellow]"
+        if cfg.retriever.score_threshold > 0.1:
+            msg += f" [dim](threshold={cfg.retriever.score_threshold} — try /threshold 0.1 to widen the search)[/dim]"
+        console.print(msg)
         return
 
     # Show retrieved sources immediately so the user sees useful info

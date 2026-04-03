@@ -39,16 +39,18 @@ class RetrievalResult:
 class Retriever:
     """High-level retriever that loads an existing index and answers queries."""
 
-    def __init__(self, config: PaperRAGConfig) -> None:
+    def __init__(self, config: PaperRAGConfig, store: "VectorStore | None" = None) -> None:
         self.config = config
         index_dir = Path(config.index_dir)
 
-        if not VectorStore.exists(index_dir):
-            raise FileNotFoundError(
-                f"No index found at {index_dir}. Run `paperrag index` first."
-            )
-
-        self.store = VectorStore.load(index_dir)
+        if store is not None:
+            self.store = store
+        else:
+            if not VectorStore.exists(index_dir):
+                raise FileNotFoundError(
+                    f"No index found at {index_dir}. Run `paperrag index` first."
+                )
+            self.store = VectorStore.load(index_dir)
 
         # Cache embedder by model name to avoid reloading
         cache_key = config.embedder.model_name
