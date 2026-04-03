@@ -199,9 +199,9 @@ class LLMConfig(BaseModel):
     model_name: str = "qwen2.5:1.5b"
     system_prompt: str = (
         "You are a helpful research assistant. "
-        "Answer strictly using the provided context. "
-        "If the answer is not in context, respond: 'I don't know.' "
-        "Be concise and direct."
+        "Answer based on the provided context. "
+        "If the context does not contain relevant information, say so. "
+        "Be concise and cite sources."
     )
     temperature: float = 0.0
     max_tokens: int = 256

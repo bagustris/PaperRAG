@@ -142,12 +142,18 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
     # Eagerly load the retriever (including embedding model) at startup
     # so the first query doesn't pay the ~6s model-loading penalty.
     # Pass the already-loaded store to avoid reading the index from disk twice.
-    console.print("[dim]Loading embedding model...\n[/dim]", end="")
+    console.print("[dim]Loading embedding model...[/dim]", end="")
     retriever = _ensure_retriever(None, cfg, store=loaded_store)
     if retriever is not None:
-        console.print("[green]Ready[/green]")
+        console.print(" [green]done[/green]")
     else:
-        console.print("[red]Failed[/red]")
+        console.print(" [red]failed[/red]")
+
+    # Pre-warm LLM so first query doesn't pay the model-loading cost
+    from paperrag.llm import prewarm_ollama
+    console.print(f"[dim]Warming up LLM ({cfg.llm.model_name})...[/dim]", end="")
+    ok = prewarm_ollama(cfg.llm)
+    console.print(" [green]done[/green]" if ok else " [dim]skipped[/dim]")
 
     # Auto-focus for single-PDF review sessions
     if auto_focus is not None and retriever is not None:
@@ -429,15 +435,15 @@ def _handle_query(
     # Show retrieved sources immediately so the user sees useful info
     # while waiting for the LLM to generate.
     console.print(f"\n[bold]Sources[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
-    # Group citation numbers by filename so each [N] in the answer maps to a visible source.
-    file_citations: dict[str, list[int]] = {}
-    for i, r in enumerate(results):
-        filename = Path(r.file_path).name
-        file_citations.setdefault(filename, []).append(i + 1)
-    for filename, numbers in file_citations.items():
-        nums = ", ".join(f"[{n}]" for n in numbers)
-        best_score = max(results[n - 1].score for n in numbers)
-        console.print(f"  [cyan]{nums}[/cyan] {filename} [dim]({best_score:.2f})[/dim]")
+    # Deduplicate sources by file: each unique file gets one citation number.
+    seen_files: dict[str, int] = {}
+    for r in results:
+        if r.file_path not in seen_files:
+            seen_files[r.file_path] = len(seen_files) + 1
+    for file_path, label in seen_files.items():
+        filename = Path(file_path).name
+        best_score = max(r.score for r in results if r.file_path == file_path)
+        console.print(f"  [cyan][{label}][/cyan] {filename} [dim]({best_score:.2f})[/dim]")
 
     try:
         import sys
@@ -445,10 +451,11 @@ def _handle_query(
         from paperrag.llm import stream_answer
 
         context_chunks = [r.text for r in results]
+        source_files = [r.file_path for r in results]
         full_answer = ""
         header_printed = False
         t1 = time.perf_counter()
-        for chunk in stream_answer(question, context_chunks, cfg.llm):
+        for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files):
             if not header_printed:
                 console.print("\n[bold green]Answer:[/bold green]")
                 header_printed = True

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [XX.YY.ZZ: Major.Minor.Patch] - YYYY-MM-DD  
 
+## [0.5.0] - 2026-04-04
+- Added autofocus mode for single PDF input  
+- Fixed double reference numbers in a single sources (like [1], [2]) 
+
 ## [0.4.3] - 2026-04-03
 - Added dynamic system prompt support via `--prompt` / `/prompt`.
 - Added `/ctx-size` command to REPL and `--ctx-size` to CLI for manual context window control.
@@ -14,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated default `max-tokens` to 256.
 - Fixed legacy `n_ctx` migration from older config snapshots.
 - Added pytest filters for third-party SWIG/Faiss warnings.
+- Fixed a bug in index with -i (now it require -d)
 
 ## [0.4.2] - 2026-04-03
 - Added `--temp` argument alias for `--temperature`.

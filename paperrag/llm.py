@@ -69,15 +69,17 @@ atexit.register(_cleanup_llama_servers)
 _MAX_CHUNK_CHARS = 750
 
 
-def _build_prompt(question: str, context_chunks: list[str]) -> str:
+def _build_prompt(question: str, context_chunks: list[str], source_labels: list[int] | None = None) -> str:
     context_lines = []
     for i, chunk in enumerate(context_chunks):
+        label = source_labels[i] if source_labels else i + 1
         # Truncate overly long chunks to keep prompt compact
         text = chunk[:_MAX_CHUNK_CHARS] + "..." if len(chunk) > _MAX_CHUNK_CHARS else chunk
-        context_lines.append(f"[{i+1}] {text}")
+        context_lines.append(f"[{label}] {text}")
     context_block = "\n\n---\n\n".join(context_lines)
 
-    n = len(context_chunks)
+    unique_labels = sorted(set(source_labels)) if source_labels else list(range(1, len(context_chunks) + 1))
+    n = len(unique_labels)
     cite_instruction = (
         "Cite the source as [1]." if n == 1
         else f"Cite sources as [1]–[{n}]. Only cite sources from [1] to [{n}]."
@@ -170,6 +172,31 @@ def _check_ollama_model_available(model_name: str) -> bool:
         # If we can't check (network error, Ollama not running, etc.), assume it's available
         # The actual API call will fail with a better error message
         return True
+
+
+def prewarm_ollama(config: LLMConfig) -> bool:
+    """Send a minimal 1-token request to load the Ollama model into memory.
+
+    Returns True if successful, False if Ollama is unreachable or llama-server backend.
+    Only applies to the Ollama backend; llama-server has its own startup mechanism.
+    """
+    if _is_llama_backend(config.model_name):
+        return False
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key="not-needed", base_url=_OLLAMA_API_URL)
+        client.chat.completions.create(
+            model=config.model_name,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+            stream=False,
+            extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
+        )
+        _model_checked.add(config.model_name)  # skip redundant check on first real query
+        return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -401,9 +428,9 @@ def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int
 # ---------------------------------------------------------------------------
 
 
-def _build_messages(question: str, context_chunks: list[str], model_name: str, system_prompt: str) -> list[dict]:
+def _build_messages(question: str, context_chunks: list[str], model_name: str, system_prompt: str, source_labels: list[int] | None = None) -> list[dict]:
     """Build the chat messages list from question, context chunks, and model name."""
-    user_prompt = _build_prompt(question, context_chunks)
+    user_prompt = _build_prompt(question, context_chunks, source_labels=source_labels)
 
     # For Qwen3 models, append /no_think to disable the slow "thinking" mode.
     # Thinking mode generates a long internal reasoning chain before answering,
@@ -422,12 +449,13 @@ def _prepare(
     question: str,
     context_chunks: list[str],
     config: LLMConfig,
+    source_labels: list[int] | None = None,
 ) -> tuple:
     """Ollama-specific setup: build messages, get/cache OpenAI client, return (client, messages)."""
     global _client_cache
     from openai import OpenAI
 
-    messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt)
+    messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels)
 
     if _client_cache is not None:
         client = _client_cache
@@ -520,6 +548,7 @@ def stream_answer(
     question: str,
     context_chunks: list[str],
     config: LLMConfig | None = None,
+    source_files: list[str] | None = None,
 ) -> Iterator[str]:
     """Yield text chunks as they arrive from the LLM (streaming).
 
@@ -541,10 +570,20 @@ def stream_answer(
         yield "No context available to answer the question."
         return
 
+    # Compute per-chunk source labels: chunks from the same file get the same number
+    source_labels: list[int] | None = None
+    if source_files:
+        file_to_label: dict[str, int] = {}
+        source_labels = []
+        for f in source_files:
+            if f not in file_to_label:
+                file_to_label[f] = len(file_to_label) + 1
+            source_labels.append(file_to_label[f])
+
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
         client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers)
-        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt)
+        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels)
         logger.info(
             "Calling llama-server streaming (model=%s, temp=%.2f)",
             config.model_name,
@@ -564,7 +603,7 @@ def stream_answer(
         return
 
     try:
-        client, messages = _prepare(question, context_chunks, config)
+        client, messages = _prepare(question, context_chunks, config, source_labels=source_labels)
     except ImportError:
         raise ImportError(
             "The 'openai' package is required. Install with: uv pip install openai"

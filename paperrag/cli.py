@@ -228,8 +228,21 @@ def index(
     from paperrag.vectorstore import VectorStore
 
     cfg = PaperRAGConfig()
+
+    # Load .paperragrc: global first, then local overrides
+    global_rc = load_rc(Path.home() / ".paperragrc")
+    local_rc = load_rc(Path.cwd() / ".paperragrc")
+    apply_rc(cfg, global_rc)
+    apply_rc(cfg, local_rc)
+
     if input_dir:
         cfg.input_dir = input_dir
+    elif not global_rc.get("input-dir") and not local_rc.get("input-dir"):
+        console.print("[red]Error: --input-dir (-d) is required[/red]")
+        console.print("Usage: paperrag index --input-dir <path> [--index-dir <path>]")
+        console.print("[dim]Tip: set input-dir in ~/.paperragrc to skip this flag[/dim]")
+        raise typer.Exit(1)
+
     if index_dir:
         cfg.index_dir = index_dir
     if checkpoint_interval is not None:
@@ -678,19 +691,22 @@ def query(
     # Show retrieved sources immediately so the user sees useful info
     # while waiting for the LLM to generate.
     console.print(f"\n[bold]Sources[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
-    seen_files: set[str] = set()
-    for i, r in enumerate(results):
-        filename = PathlibPath(r.file_path).name
-        if filename not in seen_files:
-            console.print(f"  [cyan][{i+1}][/cyan] {filename} [dim]({r.score:.2f})[/dim]")
-            seen_files.add(filename)
+    seen_files: dict[str, int] = {}
+    for r in results:
+        if r.file_path not in seen_files:
+            seen_files[r.file_path] = len(seen_files) + 1
+    for file_path, label in seen_files.items():
+        filename = PathlibPath(file_path).name
+        best_score = max(r.score for r in results if r.file_path == file_path)
+        console.print(f"  [cyan][{label}][/cyan] {filename} [dim]({best_score:.2f})[/dim]")
 
     context_chunks = [r.text for r in results]
+    source_files = [r.file_path for r in results]
     try:
         full_answer = ""
         header_printed = False
         t1 = time.perf_counter()
-        for chunk in stream_answer(question, context_chunks, cfg.llm):
+        for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files):
             if not header_printed:
                 console.print("\n[bold green]Answer:[/bold green]")
                 header_printed = True
