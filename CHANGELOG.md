@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [XX.YY.ZZ: Major.Minor.Patch] - YYYY-MM-DD  
 
+## [0.4.3] - 2026-04-03
+- Added dynamic system prompt support via `--prompt` / `/prompt`.
+- Added `/ctx-size` command to REPL and `--ctx-size` to CLI for manual context window control.
+- Added `/focus` and `/focus list` to REPL for targeting specific papers.
+- Updated default `max-tokens` to 256.
+- Fixed legacy `n_ctx` migration from older config snapshots.
+- Added pytest filters for third-party SWIG/Faiss warnings.
+
 ## [0.4.2] - 2026-04-03
 - Added `--temp` argument alias for `--temperature`.
 - Updated docs to reflect new `review` command and llama.cpp backend support.

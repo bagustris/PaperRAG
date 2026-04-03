@@ -65,7 +65,12 @@ class Retriever:
                 f"index dimension ({self.store.dimension})."
             )
 
-    def retrieve(self, query: str, top_k: int | None = None) -> list[RetrievalResult]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int | None = None,
+        file_path: str | None = None,
+    ) -> list[RetrievalResult]:
         """Embed *query* and return the top-k results from the vector store.
         
         Results are filtered by score_threshold - only results with similarity
@@ -78,10 +83,10 @@ class Retriever:
         
         # Use MMR if configured
         if self.config.retriever.use_mmr:
-            return self._retrieve_mmr(query_vec, k)
+            return self._retrieve_mmr(query_vec, k, file_path=file_path)
         
         # Standard similarity search
-        raw = self.store.search(query_vec, top_k=k)
+        raw = self.store.search(query_vec, top_k=k, file_path=file_path)
 
         results: list[RetrievalResult] = []
         for meta, score in raw:
@@ -101,12 +106,19 @@ class Retriever:
             )
         
         # Apply per-paper limit (simple re-ranking)
-        results = self._rerank_by_paper(results)
+        # Skip reranking if we're focused on a single paper
+        if not file_path:
+            results = self._rerank_by_paper(results)
         
         logger.info("Retrieved %d results for query: %.80s", len(results), query)
         return results
 
-    def _retrieve_mmr(self, query_vec: np.ndarray, k: int) -> list[RetrievalResult]:
+    def _retrieve_mmr(
+        self,
+        query_vec: np.ndarray,
+        k: int,
+        file_path: str | None = None,
+    ) -> list[RetrievalResult]:
         """Maximal Marginal Relevance retrieval for diverse results.
         
         MMR iteratively selects results that maximize:
@@ -116,9 +128,11 @@ class Retriever:
         """
         lambda_param = self.config.retriever.mmr_lambda
         fetch_k = k * 3  # Fetch more candidates for diversity
+        if file_path:
+            fetch_k = max(fetch_k, 50)
         
         # Get initial candidates
-        raw = self.store.search(query_vec, top_k=fetch_k)
+        raw = self.store.search(query_vec, top_k=fetch_k, file_path=file_path)
         
         if not raw:
             return []

@@ -101,6 +101,37 @@ def test_search_empty():
     assert results == []
 
 
+def test_search_with_filter():
+    store = VectorStore(TMP_DIR, DIM)
+    # Add 3 chunks for file A
+    vecs_a = _make_vecs(3)
+    chunks_a = _make_chunks(3, "/a.pdf")
+    store.add(vecs_a, chunks_a)
+    
+    # Add 2 chunks for file B
+    vecs_b = _make_vecs(2)
+    chunks_b = _make_chunks(2, "/b.pdf")
+    store.add(vecs_b, chunks_b)
+    
+    assert store.index.ntotal == 5
+    
+    # Search for something that would normally match file A's first chunk
+    # but filter for file B.
+    # vecs_a[0] is most similar to chunks_a[0].
+    results = store.search(vecs_a[0], top_k=2, file_path="/b.pdf")
+    
+    # All results must be from file B
+    assert len(results) <= 2
+    for meta, score in results:
+        assert meta["file_path"] == "/b.pdf"
+    
+    # Search for file A
+    results_a = store.search(vecs_a[0], top_k=1, file_path="/a.pdf")
+    assert len(results_a) == 1
+    assert results_a[0][0]["file_path"] == "/a.pdf"
+    assert results_a[0][0]["chunk_id"] == 0
+
+
 def test_checkpoint_saves():
     """Test multiple saves simulate checkpointing behavior."""
     store = VectorStore(TMP_DIR, DIM)

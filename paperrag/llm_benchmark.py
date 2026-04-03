@@ -179,7 +179,7 @@ def run_benchmark(args: argparse.Namespace) -> None:
     # Index metadata for experiment logs
     store = retriever.store
     num_chunks = store.index.ntotal if hasattr(store.index, "ntotal") else 0
-    unique_files = {m.get("file_path", "") for m in store.metadata if m.get("file_path")}
+    unique_files = {m.get("file_path", "") for m in store.chunks if m.get("file_path")}
     num_documents = len(unique_files)
 
     models = [m.strip() for m in args.models.split(",")]
@@ -376,10 +376,11 @@ def _generate_results_md(
     header = "| Model | Avg Latency (ms) | Avg Answer Len | Non-Empty Rate | Citation Rate |"
     sep = "|-------|-------------------|----------------|----------------|---------------|"
     if has_judge:
-        header += " Relevance | Faithfulness |"
-        sep += "-----------|--------------|"
-    header += " Note |"
-    sep += "------|"
+        header += " Relevance | Faithfulness | Note |"
+        sep += "-----------|--------------|------|"
+    else:
+        header += " Note |"
+        sep += "------|"
 
     lines.extend(["## Model Comparison", "", header, sep])
 
@@ -426,8 +427,8 @@ def main() -> None:
         help="Number of chunks to retrieve per question (default: 3)",
     )
     parser.add_argument(
-        "--max-tokens", type=int, default=128,
-        help="Maximum tokens for LLM generation (default: 128)",
+        "--max-tokens", type=int, default=256,
+        help="Maximum tokens for LLM generation (default: 256)",
     )
     parser.add_argument(
         "--judge-model", default=None,

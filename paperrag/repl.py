@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit import HTML, PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.history import InMemoryHistory
@@ -23,6 +23,7 @@ console = Console()
 # All slash-commands available in the REPL
 SLASH_COMMANDS: list[str] = [
     "/index",
+    "/focus",
     "/topk",
     "/threshold",
     "/temperature",
@@ -42,6 +43,7 @@ HELP_TEXT = """\
   [cyan]<any text>[/cyan]              Query the indexed papers (uses top-k retrieval + LLM)
   [cyan]/index[/cyan]                  Re-index the current PDF directory/file
   [cyan]/index <path>[/cyan]           Re-index a specific PDF file or directory
+  [cyan]/focus <substring>[/cyan]     Focus all subsequent queries on a specific paper
   [cyan]/topk <n>[/cyan]               Set top-k for retrieval (default: 3)
   [cyan]/threshold <n>[/cyan]          Set similarity threshold 0.0-1.0 (default: 0.15)
   [cyan]/temperature <n>[/cyan]        Set LLM temperature 0.0-2.0 (default: 0.0)
@@ -139,6 +141,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
     console.print("Type [cyan]/help[/cyan] for commands, or [cyan]/[/cyan] + Tab for autocomplete.\n")
 
     top_k = cfg.retriever.top_k
+    focused_file: str | None = None
 
     # Eagerly load the retriever (including embedding model) at startup
     # so the first query doesn't pay the ~6s model-loading penalty.
@@ -161,7 +164,15 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
 
     while True:
         try:
-            command = session.prompt("paperrag> ").strip()
+            if focused_file:
+                short_name = Path(focused_file).name
+                if len(short_name) > 20:
+                    short_name = short_name[:17] + "..."
+                prompt_text = HTML(f"paperrag <ansigreen>({short_name})</ansigreen>> ")
+            else:
+                prompt_text = "paperrag> "
+                
+            command = session.prompt(prompt_text).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\nBye!")
             break
@@ -190,6 +201,55 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
                 cfg._index_dir = None
             _handle_index(cfg)
             retriever = None  # force reload after re-index
+            focused_file = None  # reset focus as index has changed
+            continue
+
+        if cmd_parts[0] == "/focus":
+            retriever = _ensure_retriever(retriever, cfg)
+            if retriever is None:
+                continue
+            
+            # Get all unique files in index
+            all_files = sorted(list(retriever.store.file_hashes.keys()))
+            
+            if len(cmd_parts) == 1:
+                focused_file = None
+                console.print("[green]Focus reset: searching all indexed papers.[/green]")
+                continue
+
+            arg = cmd_parts[1].strip().lower()
+
+            if arg == "list":
+                console.print(f"[bold]Indexed papers ({len(all_files)} total):[/bold]")
+                for f in all_files[:5]:
+                    console.print(f"  - {Path(f).name}")
+                if len(all_files) > 5:
+                    console.print(f"  ... and {len(all_files) - 5} others")
+                continue
+
+            # Substring/Pattern matching
+            matches = [f for f in all_files if arg in Path(f).name.lower()]
+            
+            if not matches:
+                console.print(f"[red]No indexed papers match '{arg}'[/red]")
+                # Show a small sample to help the user
+                console.print("[dim]Available papers (sample):[/dim]")
+                for f in all_files[:5]:
+                    console.print(f"  - {Path(f).name}")
+                if len(all_files) > 5:
+                    console.print(f"  ... and {len(all_files) - 5} others. Use [cyan]/focus list[/cyan] to see more.")
+            elif len(matches) == 1:
+                focused_file = matches[0]
+                console.print(f"Focus set to: [green]{Path(focused_file).name}[/green]")
+            else:
+                console.print(f"[yellow]Multiple matches for '{arg}':[/yellow]")
+                # Show all matches if reasonable, otherwise truncate
+                display_matches = matches[:10]
+                for f in display_matches:
+                    console.print(f"  - {Path(f).name}")
+                if len(matches) > 10:
+                    console.print(f"  ... and {len(matches) - 10} other matches.")
+                console.print("[dim]Please be more specific or copy-paste a name from above.[/dim]")
             continue
 
         if cmd_parts[0] == "/topk":
@@ -277,7 +337,11 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
             console.print(f"  System prompt: [dim]{cfg.llm.system_prompt}[/dim]")
             console.print("[bold]Retrieval:[/bold]")
             console.print(f"  Top-k: [cyan]{top_k}[/cyan]")
-            console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]\n")
+            console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]")
+            if focused_file:
+                console.print(f"  Focus: [green]{Path(focused_file).name}[/green]\n")
+            else:
+                console.print("  Focus: [dim]none (searching all papers)[/dim]\n")
             continue
 
         if command == "/rc":
@@ -307,7 +371,7 @@ def start_repl(cfg: PaperRAGConfig | None = None) -> None:
         retriever = _ensure_retriever(retriever, cfg)
         if retriever is None:
             continue
-        _handle_query(command, retriever, cfg, top_k=top_k)
+        _handle_query(command, retriever, cfg, top_k=top_k, focused_file=focused_file)
 
 
 def _ensure_retriever(retriever, cfg: PaperRAGConfig):
@@ -329,12 +393,13 @@ def _handle_query(
     cfg: PaperRAGConfig,
     *,
     top_k: int,
+    focused_file: str | None = None,
 ) -> None:
     """Run retrieval and LLM for a user question."""
     import time
 
     t0 = time.perf_counter()
-    results = retriever.retrieve(question, top_k=top_k)
+    results = retriever.retrieve(question, top_k=top_k, file_path=focused_file)
     t_retrieval = time.perf_counter() - t0
 
     if not results:
@@ -344,12 +409,15 @@ def _handle_query(
     # Show retrieved sources immediately so the user sees useful info
     # while waiting for the LLM to generate.
     console.print(f"\n[bold]Sources[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
-    seen_files: set[str] = set()
+    # Group citation numbers by filename so each [N] in the answer maps to a visible source.
+    file_citations: dict[str, list[int]] = {}
     for i, r in enumerate(results):
         filename = Path(r.file_path).name
-        if filename not in seen_files:
-            console.print(f"  [cyan][{i+1}][/cyan] {filename} [dim]({r.score:.2f})[/dim]")
-            seen_files.add(filename)
+        file_citations.setdefault(filename, []).append(i + 1)
+    for filename, numbers in file_citations.items():
+        nums = ", ".join(f"[{n}]" for n in numbers)
+        best_score = max(results[n - 1].score for n in numbers)
+        console.print(f"  [cyan]{nums}[/cyan] {filename} [dim]({best_score:.2f})[/dim]")
 
     try:
         import sys

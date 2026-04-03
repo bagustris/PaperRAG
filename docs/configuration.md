@@ -47,6 +47,8 @@ input-dir = "/home/user/papers"
 | `threshold` | Minimum similarity score | `float` |
 | `index-dir` | Index directory path | `str` |
 | `input-dir` | PDF input directory path | `str` |
+| `ctx-size` | LLM context window size | `int` |
+| `system-prompt` | Override the system prompt | `str` |
 
 Unknown keys produce a warning but do not cause errors. Invalid TOML files are skipped with a warning.
 
@@ -127,6 +129,9 @@ Each worker requires approximately 2 GB of RAM during peak Docling usage.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model_name` | `str` | `qwen3:1.7b` | LLM model name |
+| `model_name` | `str` | `qwen2.5:1.5b` | LLM model name |
+| `system_prompt` | `str` | (default researcher prompt) | System persona |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `256` | Maximum response tokens |
+| `ctx_size` | `int` | `2048` | Context window size |
+

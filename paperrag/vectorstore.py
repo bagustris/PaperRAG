@@ -173,17 +173,34 @@ class VectorStore:
     # Search
     # ------------------------------------------------------------------
 
-    def search(self, query_vec: np.ndarray, top_k: int = 3) -> list[tuple[dict, float]]:
-        """Return top-k (chunk_metadata, score) pairs."""
+    def search(
+        self,
+        query_vec: np.ndarray,
+        top_k: int = 3,
+        file_path: str | None = None,
+    ) -> list[tuple[dict, float]]:
+        """Return top-k (chunk_metadata, score) pairs, optionally filtered by file_path."""
         if self.index.ntotal == 0:
             return []
         query_vec = np.asarray(query_vec, dtype=np.float32)
         if query_vec.ndim == 1:
             query_vec = query_vec.reshape(1, -1)
-        scores, indices = self.index.search(query_vec, min(top_k, self.index.ntotal))
+
+        # If filtering by file_path, we fetch more results to increase the
+        # chance of finding top-k matches for that specific file.
+        fetch_k = min(self.index.ntotal, 100 if file_path else top_k)
+        if file_path and fetch_k < top_k * 5:
+            fetch_k = min(self.index.ntotal, top_k * 10)
+
+        scores, indices = self.index.search(query_vec, fetch_k)
         results: list[tuple[dict, float]] = []
         for score, idx in zip(scores[0], indices[0]):
             if idx < 0:
                 continue
-            results.append((self.chunks[idx], float(score)))
+            meta = self.chunks[idx]
+            if file_path and meta["file_path"] != file_path:
+                continue
+            results.append((meta, float(score)))
+            if len(results) >= top_k:
+                break
         return results

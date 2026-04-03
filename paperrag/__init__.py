@@ -1,3 +1,3 @@
-"""PaperRAG - Production-grade local RAG for academic PDFs."""
+"""PaperRAG - Research-oriented RAG for local academic PDFs."""
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"

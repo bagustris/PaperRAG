@@ -158,6 +158,7 @@ Inside the REPL, all control commands are slash-prefixed:
 | `<any text>` | Query the indexed papers |
 | `/index` | Re-index the current PDF directory or file |
 | `/index <path>` | Re-index a different PDF file or directory |
+| `/focus <name>` | Focus queries on a specific paper (use `list` to see options) |
 | `/topk <n>` | Set top-k retrieval |
 | `/threshold <n>` | Set minimum similarity score |
 | `/temperature <n>` | Set LLM temperature |

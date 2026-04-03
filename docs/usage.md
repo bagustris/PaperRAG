@@ -43,6 +43,7 @@ REPL commands:
 | `<any text>` | Query the indexed papers |
 | `/index` | Re-index the current PDF directory or file |
 | `/index <path>` | Re-index a specific PDF file or directory |
+| `/focus <name>` | Focus queries on a specific paper (use `list` to see options) |
 | `/topk <n>` | Set number of retrieved chunks |
 | `/threshold <n>` | Set minimum similarity score (0.0–1.0) |
 | `/temperature <n>` | Set LLM temperature (0.0–2.0) |

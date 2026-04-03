@@ -77,11 +77,15 @@ def _build_prompt(question: str, context_chunks: list[str]) -> str:
         context_lines.append(f"[{i+1}] {text}")
     context_block = "\n\n---\n\n".join(context_lines)
 
+    n = len(context_chunks)
+    cite_instruction = (
+        "Cite the source as [1]." if n == 1
+        else f"Cite sources as [1]–[{n}]. Only cite sources from [1] to [{n}]."
+    )
     return (
         f"Context:\n{context_block}\n\n"
         f"Question: {question}\n\n"
-        f"Answer concisely using ONLY the context. Cite sources as [1], [2], etc.\n\n"
-        f"Answer:"
+        f"Answer concisely using ONLY the context. {cite_instruction}"
     )
 
 
