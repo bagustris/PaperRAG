@@ -19,11 +19,15 @@ Deepwiki:  https://deepwiki.com/bagustris/PaperRAG
 
 ## Installation
 
-### 1. Install Ollama
+### 1. Install a Local LLM Backend
 
-Download from https://ollama.com, then pull the recommended model:
+For Ollama models, download from https://ollama.com, then pull the default recommended model:
 
     ollama pull qwen2.5:1.5b
+
+For GGUF models, install `llama-server` from `llama.cpp`, then point `paperrag` at a local `.gguf` file path:
+
+    brew install llama-cpp
 
 ### 2. Install Python 3.11 and uv
 
@@ -65,6 +69,34 @@ Note: `pip install -e ".[gpu]"` cannot by itself switch PyTorch from CPU to CUDA
 reliably, because PyTorch CPU and CUDA wheels come from different indexes, and
 `pip` does not read `tool.uv.sources`. The index has to be selected on the
 command line for `pip` and `uv pip`. Pure `uv sync` remains CPU-only by design.
+
+------------------------------------------------------------------------
+
+## Suggested Models
+
+| Device (CPU/GPU) | Backend | Models | Size |
+|--------|---------|-------------|------|
+| CPU | Ollama | `qwen2.5:1.5b` (default recommended) | 986 MB |
+| CPU | Ollama | `qwen3:1.7b` | 1.4 GB |
+| GPU | Ollama | `llama3.2:3b` | 2 GB |
+| CPU/GPU | Ollama | `phi4-mini-reasoning:latest` | 3.2 GB |
+| CPU/GPU | Ollama | `gemma3:1b` | 815 MB |
+| GPU | Ollama | `gemma3:12b` | 8.1 GB |
+| GPU | Ollama | `phi4-mini:latest` | 2.5 GB |
+| GPU | Ollama | `gemma4:e4b` | 9.6 GB |
+| CPU/GPU | GGUF (`llama.cpp`) | `LFM2.5-1.2B-Instruct-Q4_K_M.gguf` (recommended GGUF path) | 731 MB |
+
+For other Hugging Face GGUF models, prefer quantizations such as `Q4_K_M`, `Q8_0`, or similar variants available in the same repo. Example:
+
+    Qwen/Qwen3-1.7B-GGUF:Q8_0
+
+Use Ollama model names directly:
+
+    paperrag query "what is speech chain?" --index-dir /path/to/.paperrag-index -m qwen2.5:1.5b
+
+Use a local GGUF file through `llama.cpp`:
+
+    paperrag query "what is speech chain?" --index-dir /path/to/.paperrag-index -m /path/to/LFM2.5-1.2B-Instruct-Q4_K_M.gguf
 
 ------------------------------------------------------------------------
 

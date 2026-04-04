@@ -6,6 +6,7 @@ This mode is first class in PaperRAG
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from prompt_toolkit import HTML, PromptSession
@@ -29,6 +30,8 @@ SLASH_COMMANDS: list[str] = [
     "/temperature",
     "/max-tokens",
     "/ctx-size",
+    "/n-gpu-layers",
+    "/n-threads",
     "/prompt",
     "/model",
     "/config",
@@ -49,6 +52,8 @@ HELP_TEXT = """\
   [cyan]/temperature <n>[/cyan]        Set LLM temperature 0.0-2.0 (default: 0.0)
   [cyan]/max-tokens <n>[/cyan]         Set LLM max output tokens (default: 256)
   [cyan]/ctx-size <n>[/cyan]           Set LLM context window size (default: 2048)
+  [cyan]/n-gpu-layers <n>[/cyan]       Set GPU layers for llama.cpp backend (0 = CPU only)
+  [cyan]/n-threads <n>[/cyan]          Set CPU threads for llama.cpp backend (0 = auto)
   [cyan]/prompt <text>[/cyan]          Set LLM system prompt
   [cyan]/model <name>[/cyan]           Set LLM model name
   [cyan]/config[/cyan]                 Show current configuration
@@ -334,6 +339,23 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
                 console.print("[yellow]Usage: /ctx-size <number>[/yellow]")
             continue
 
+        if cmd_parts[0] == "/n-gpu-layers":
+            if len(cmd_parts) == 2 and cmd_parts[1].isdigit():
+                cfg.llm.n_gpu_layers = int(cmd_parts[1])
+                console.print(f"GPU layers set to [cyan]{cfg.llm.n_gpu_layers}[/cyan] (takes effect on next llama-server start)")
+            else:
+                console.print("[yellow]Usage: /n-gpu-layers <number>[/yellow]")
+            continue
+
+        if cmd_parts[0] == "/n-threads":
+            if len(cmd_parts) == 2 and cmd_parts[1].isdigit():
+                cfg.llm.n_threads = int(cmd_parts[1])
+                label = str(cfg.llm.n_threads) if cfg.llm.n_threads > 0 else f"auto ({os.cpu_count()})"
+                console.print(f"CPU threads set to [cyan]{label}[/cyan] (takes effect on next llama-server start)")
+            else:
+                console.print("[yellow]Usage: /n-threads <number> (0 = auto)[/yellow]")
+            continue
+
         if cmd_parts[0] == "/prompt":
             if len(cmd_parts) == 2:
                 cfg.llm.system_prompt = cmd_parts[1].strip()
@@ -357,6 +379,9 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
             console.print(f"  Temperature: [cyan]{cfg.llm.temperature}[/cyan]")
             console.print(f"  Max tokens: [cyan]{cfg.llm.max_tokens}[/cyan]")
             console.print(f"  Context size: [cyan]{cfg.llm.ctx_size}[/cyan]")
+            console.print(f"  GPU layers (llama.cpp): [cyan]{cfg.llm.n_gpu_layers}[/cyan]")
+            n_threads_label = str(cfg.llm.n_threads) if cfg.llm.n_threads > 0 else f"auto ({os.cpu_count()})"
+            console.print(f"  CPU threads (llama.cpp): [cyan]{n_threads_label}[/cyan]")
             console.print(f"  System prompt: [dim]{cfg.llm.system_prompt}[/dim]")
             console.print("[bold]Retrieval:[/bold]")
             console.print(f"  Top-k: [cyan]{cfg.retriever.top_k}[/cyan]")

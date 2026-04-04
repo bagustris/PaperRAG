@@ -21,6 +21,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -53,12 +54,15 @@ def _cleanup_llama_servers() -> None:
     """Terminate all managed llama-server processes at interpreter exit."""
     for proc in list(_llama_server_procs.values()):
         try:
+            if proc.poll() is not None:
+                continue
             proc.terminate()
             proc.wait(timeout=_PROC_WAIT_TIMEOUT)
-        except Exception:
+        except BaseException:
             try:
-                proc.kill()
-            except Exception:
+                if proc.poll() is None:
+                    proc.kill()
+            except BaseException:
                 pass
 
 
@@ -67,6 +71,7 @@ atexit.register(_cleanup_llama_servers)
 # Maximum characters per context chunk sent to the LLM.
 # Longer chunks are truncated to keep prompt size manageable for small models.
 _MAX_CHUNK_CHARS = 750
+_TRAILING_SOURCE_LINE_RE = re.compile(r"^\s*Sources?:\s*\[[0-9,\s-]+\]\s*$", re.IGNORECASE)
 
 
 def _build_prompt(question: str, context_chunks: list[str], source_labels: list[int] | None = None) -> str:
@@ -81,14 +86,38 @@ def _build_prompt(question: str, context_chunks: list[str], source_labels: list[
     unique_labels = sorted(set(source_labels)) if source_labels else list(range(1, len(context_chunks) + 1))
     n = len(unique_labels)
     cite_instruction = (
-        "Cite the source as [1]." if n == 1
-        else f"Cite sources as [1]–[{n}]. Only cite sources from [1] to [{n}]."
+        "Use inline citation [1] within your answer." if n == 1
+        else f"Use inline citations [1]–[{n}] within your answer. Only cite sources from [1] to [{n}]."
     )
     return (
         f"Context:\n{context_block}\n\n"
         f"Question: {question}\n\n"
-        f"Answer concisely using ONLY the context. {cite_instruction}"
+        f"Answer concisely using ONLY the context. {cite_instruction} Do not add a separate 'Source:' or 'Sources:' list at the end."
     )
+
+
+def _strip_trailing_source_footers(text: str) -> str:
+    """Remove standalone trailing ``Source: [n]`` footer lines from model output."""
+    lines = text.splitlines()
+    end = len(lines)
+
+    while end > 0 and not lines[end - 1].strip():
+        end -= 1
+
+    while end > 0 and _TRAILING_SOURCE_LINE_RE.match(lines[end - 1]):
+        end -= 1
+        while end > 0 and not lines[end - 1].strip():
+            end -= 1
+
+    return "\n".join(lines[:end]).strip()
+
+
+def _sanitize_stream(chunks: Iterator[str]) -> Iterator[str]:
+    """Buffer streamed text and remove trailing source footers before yielding."""
+    text = "".join(chunks)
+    cleaned = _strip_trailing_source_footers(text)
+    if cleaned:
+        yield cleaned
 
 
 _OLLAMA_BASE_URL = "http://localhost:11434"
@@ -318,11 +347,11 @@ def _wait_for_llama_server(port: int, timeout: float = 120.0) -> bool:
     return False
 
 
-def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int) -> object:
+def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int, n_threads: int = 0) -> object:
     """Return a cached OpenAI client connected to a running ``llama-server``.
 
     Starts a new ``llama-server`` process on a free port if none is cached for
-    the given ``(model_path, ctx_size, n_gpu_layers)`` combination, or if the
+    the given ``(model_path, ctx_size, n_gpu_layers, n_threads)`` combination, or if the
     previously started process has exited unexpectedly.
 
     The server process is registered with :func:`atexit` and terminated when
@@ -332,7 +361,8 @@ def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int
     """
     from openai import OpenAI
 
-    cache_key = (model_path, ctx_size, n_gpu_layers)
+    effective_threads = n_threads if n_threads > 0 else (os.cpu_count() or 4)
+    cache_key = (model_path, ctx_size, n_gpu_layers, effective_threads)
 
     # Re-use existing server if still alive
     if cache_key in _llama_server_clients:
@@ -359,6 +389,7 @@ def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int
             "--port", str(port),
             "--ctx-size", str(ctx_size),
             "--n-gpu-layers", str(n_gpu_layers),
+            "--threads", str(effective_threads),
             "--parallel", "1",
         ]
 
@@ -514,7 +545,7 @@ def generate_answer(
 
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
-        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers)
+        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
         messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt)
         logger.info(
             "Calling llama-server (model=%s, temp=%.2f)", config.model_name, config.temperature
@@ -525,7 +556,7 @@ def generate_answer(
             temperature=config.temperature,
             max_tokens=config.max_tokens,
         )
-        return (response.choices[0].message.content or "").strip()
+        return _strip_trailing_source_footers(response.choices[0].message.content or "")
 
     try:
         client, messages = _prepare(question, context_chunks, config)
@@ -541,7 +572,7 @@ def generate_answer(
         max_tokens=config.max_tokens,
         extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
     )
-    return (response.choices[0].message.content or "").strip()
+    return _strip_trailing_source_footers(response.choices[0].message.content or "")
 
 
 def stream_answer(
@@ -582,7 +613,7 @@ def stream_answer(
 
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
-        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers)
+        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
         messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels)
         logger.info(
             "Calling llama-server streaming (model=%s, temp=%.2f)",
@@ -596,10 +627,11 @@ def stream_answer(
             max_tokens=config.max_tokens,
             stream=True,
         )
-        for chunk in response:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        yield from _sanitize_stream(
+            delta
+            for chunk in response
+            if (delta := chunk.choices[0].delta.content)
+        )
         return
 
     try:
@@ -617,10 +649,11 @@ def stream_answer(
         stream=True,
         extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
     )
-    for chunk in response:
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+    yield from _sanitize_stream(
+        delta
+        for chunk in response
+        if (delta := chunk.choices[0].delta.content)
+    )
 
 
 def describe_llm_error(exc: Exception, model_name: str) -> tuple[str, str | None]:

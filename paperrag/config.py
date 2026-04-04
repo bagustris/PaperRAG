@@ -24,6 +24,7 @@ _RC_KEY_MAP: dict[str, tuple[str, type]] = {
     "ctx-size": ("llm.ctx_size", int),
     "system-prompt": ("llm.system_prompt", str),
     "n-gpu-layers": ("llm.n_gpu_layers", int),
+    "n-threads": ("llm.n_threads", int),
 }
 
 
@@ -222,6 +223,14 @@ class LLMConfig(BaseModel):
             "Number of layers to offload to GPU when using the llama.cpp backend (0 = CPU only). "
             "Ollama manages GPU offloading independently via its own configuration; "
             "this field has no effect on the Ollama backend."
+        ),
+    )
+    n_threads: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Number of CPU threads for the llama.cpp backend (0 = auto-detect via os.cpu_count()). "
+            "Has no effect on the Ollama backend."
         ),
     )
 

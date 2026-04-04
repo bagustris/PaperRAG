@@ -10,9 +10,12 @@ from paperrag.config import LLMConfig
 from paperrag.llm import (
     _build_messages,
     _build_prompt,
+    _cleanup_llama_servers,
     _is_gguf_model,
     _is_hf_model,
     _is_llama_backend,
+    _sanitize_stream,
+    _strip_trailing_source_footers,
     _llama_server_clients,
     _llama_server_procs,
     _resolve_model_path,
@@ -178,6 +181,39 @@ def test_stream_answer_no_context():
     assert chunks == ["No context available to answer the question."]
 
 
+def test_strip_trailing_source_footers_removes_footer_lines_only():
+    text = "Answer sentence [1].\n\nSource: [1]\nSource: [2]\n"
+    assert _strip_trailing_source_footers(text) == "Answer sentence [1]."
+
+
+def test_strip_trailing_source_footers_keeps_inline_source_word():
+    text = "The source separation method improves SER [1]."
+    assert _strip_trailing_source_footers(text) == text
+
+
+def test_sanitize_stream_removes_trailing_source_footer():
+    chunks = ["Answer text [1].\n", "\nSource: [1]\n", "Source: [2]\n"]
+    assert list(_sanitize_stream(iter(chunks))) == ["Answer text [1]."]
+
+
+def test_cleanup_llama_servers_swallows_keyboard_interrupt():
+    fake_proc = MagicMock()
+    fake_proc.poll.side_effect = [None, None]
+    fake_proc.wait.side_effect = KeyboardInterrupt()
+
+    original_procs = dict(_llama_server_procs)
+    try:
+        _llama_server_procs.clear()
+        _llama_server_procs[("model.gguf", 2048, 0, 4)] = fake_proc
+        _cleanup_llama_servers()
+    finally:
+        _llama_server_procs.clear()
+        _llama_server_procs.update(original_procs)
+
+    fake_proc.terminate.assert_called_once()
+    fake_proc.kill.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # generate_answer — llama-server path (mocked)
 # ---------------------------------------------------------------------------
@@ -200,7 +236,7 @@ def test_generate_answer_llama_server_mocked(tmp_path):
         result = generate_answer("What?", ["some context"], cfg)
 
     assert result == "answer text"
-    mock_start.assert_called_once_with(str(model_file), cfg.ctx_size, cfg.n_gpu_layers)
+    mock_start.assert_called_once_with(str(model_file), cfg.ctx_size, cfg.n_gpu_layers, cfg.n_threads)
 
 
 def test_generate_answer_hf_model_mocked():
@@ -239,7 +275,7 @@ def test_stream_answer_llama_server_mocked(tmp_path):
     with patch("paperrag.llm._get_or_start_llama_server", return_value=fake_client):
         chunks = list(stream_answer("What?", ["ctx"], cfg))
 
-    assert chunks == ["Hello", " world"]
+    assert chunks == ["Hello world"]
 
 
 def test_generate_answer_gguf_file_not_found():
@@ -301,4 +337,3 @@ def test_describe_llm_error_ollama_generic():
     msg, hint = describe_llm_error(exc, "qwen2.5:1.5b")
     assert "LLM error" in msg
     assert hint is None
-
