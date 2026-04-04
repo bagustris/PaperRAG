@@ -27,7 +27,12 @@ class Embedder:
             self.config.model_name,
             device,
         )
-        self.model = SentenceTransformer(self.config.model_name, device=device)
+        try:
+            self.model = SentenceTransformer(
+                self.config.model_name, device=device, local_files_only=True
+            )
+        except Exception:
+            self.model = SentenceTransformer(self.config.model_name, device=device)
         self.device = device
         self.dimension: int = self.model.get_sentence_embedding_dimension()  # type: ignore[assignment]
         logger.info("Embedding dimension: %d", self.dimension)
