@@ -78,31 +78,70 @@ def _print_gpu_info() -> None:
     """Detect and display GPU availability with an Ollama inference hint."""
     try:
         import torch
+
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
-            console.print(f"[green]GPU detected:[/green] {gpu_name} — Ollama will use it automatically for faster inference")
+            console.print(
+                f"[green]GPU detected:[/green] {gpu_name} — Ollama will use it automatically for faster inference"
+            )
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            console.print("[green]GPU detected:[/green] Apple Silicon MPS — Ollama will use it automatically")
+            console.print(
+                "[green]GPU detected:[/green] Apple Silicon MPS — Ollama will use it automatically"
+            )
         else:
             console.print("[dim]Running on CPU, No GPU detected[/dim]")
     except Exception:
         pass
 
 
-
 @app.callback(invoke_without_command=True)
 def entrypoint(
     ctx: typer.Context,
-    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True, help="Show version and license"),
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file to index"),
-    index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (will auto-discover .paperrag-index subdirectory if needed)"),
-    topk: int = typer.Option(None, "--top-k", "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
-    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
-    threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0, default: 0.15)"),
-    temperature: float = typer.Option(None, "--temperature", "--temp", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
-    ctx_size: int = typer.Option(None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"),
-    system_prompt: str = typer.Option(None, "--system-prompt", "--prompt", help="LLM system prompt"),
+    version: bool = typer.Option(
+        None,
+        "--version",
+        "-v",
+        callback=version_callback,
+        is_eager=True,
+        help="Show version and license",
+    ),
+    input_dir: str = typer.Option(
+        None, "--input-dir", "-d", help="PDF directory or single PDF file to index"
+    ),
+    index_dir: str = typer.Option(
+        None,
+        "--index-dir",
+        "-i",
+        help="Index directory (will auto-discover .paperrag-index subdirectory if needed)",
+    ),
+    topk: int = typer.Option(
+        None,
+        "--top-k",
+        "--topk",
+        "-k",
+        help="Number of chunks to retrieve for context (default: 3)",
+    ),
+    model: str = typer.Option(
+        None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"
+    ),
+    threshold: float = typer.Option(
+        None,
+        "--threshold",
+        "-t",
+        help="Minimum similarity score threshold (0.0-1.0, default: 0.15)",
+    ),
+    temperature: float = typer.Option(
+        None, "--temperature", "--temp", help="LLM temperature (0.0-2.0, default: 0.0)"
+    ),
+    max_tokens: int = typer.Option(
+        None, "--max-tokens", help="LLM max output tokens (default: 256)"
+    ),
+    ctx_size: int = typer.Option(
+        None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"
+    ),
+    system_prompt: str = typer.Option(
+        None, "--system-prompt", "--prompt", help="LLM system prompt"
+    ),
 ) -> None:
     """PaperRAG - local RAG for academic PDFs."""
     if ctx.invoked_subcommand is None:
@@ -130,8 +169,12 @@ def entrypoint(
                     console.print(f"[dim]Using index at {candidate}[/dim]")
                     break
             else:
-                console.print("[red]Error: no index found. Pass --index-dir or run paperrag from an indexed folder.[/red]")
-                console.print("[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]")
+                console.print(
+                    "[red]Error: no index found. Pass --index-dir or run paperrag from an indexed folder.[/red]"
+                )
+                console.print(
+                    "[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]"
+                )
                 raise typer.Exit(1)
 
         index_path = Path(effective_index_dir).resolve()
@@ -144,7 +187,9 @@ def entrypoint(
                 console.print(f"[dim]Found index at {subdir_path}[/dim]")
                 index_path = subdir_path
             else:
-                console.print(f"[red]No index found at {index_path} or {subdir_path}[/red]")
+                console.print(
+                    f"[red]No index found at {index_path} or {subdir_path}[/red]"
+                )
                 raise typer.Exit(1)
 
         cfg.index_dir = str(index_path)
@@ -156,9 +201,13 @@ def entrypoint(
                 try:
                     loaded_cfg = PaperRAGConfig.load_snapshot(snapshot_file)
                     # Apply input_dir from snapshot (but keep CLI overrides)
-                    if not input_dir:  # Only use snapshot if user didn't specify input_dir
+                    if (
+                        not input_dir
+                    ):  # Only use snapshot if user didn't specify input_dir
                         cfg.input_dir = loaded_cfg.input_dir
-                        console.print(f"[dim]Loaded PDF directory from index: {cfg.input_dir}[/dim]")
+                        console.print(
+                            f"[dim]Loaded PDF directory from index: {cfg.input_dir}[/dim]"
+                        )
                 except Exception as e:
                     logger.warning("Could not load config snapshot: %s", e)
 
@@ -194,36 +243,45 @@ def entrypoint(
 # -- index -----------------------------------------------------------------
 @app.command()
 def index(
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
-    index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: <input-dir>/.paperrag-index)"),
+    input_dir: str = typer.Option(
+        None, "--input-dir", "-d", help="PDF directory or single PDF file"
+    ),
+    index_dir: str = typer.Option(
+        None,
+        "--index-dir",
+        "-i",
+        help="Index directory (default: <input-dir>/.paperrag-index)",
+    ),
     force: bool = typer.Option(False, "--force", "-f", help="Force full re-index"),
     checkpoint_interval: int = typer.Option(
         None,
         "--checkpoint-interval",
         "-c",
-        help="Save index every N PDFs (0 to disable checkpointing)"
+        help="Save index every N PDFs (0 to disable checkpointing)",
     ),
     workers: int = typer.Option(
-        None,
-        "--workers",
-        "-w",
-        help="Number of parallel workers (0 = auto-detect)"
+        None, "--workers", "-w", help="Number of parallel workers (0 = auto-detect)"
     ),
     ocr: str = typer.Option(
         "auto",
         "--ocr",
-        help="OCR mode: 'auto' (detect per PDF, recommended), 'always' (force), 'never' (disable)"
+        help="OCR mode: 'auto' (detect per PDF, recommended), 'always' (force), 'never' (disable)",
     ),
     manifest: str = typer.Option(
         None,
         "--manifest",
-        help="CSV manifest file with columns: filename,title,authors,abstract,doi (speeds up indexing)"
+        help="CSV manifest file with columns: filename,title,authors,abstract,doi (speeds up indexing)",
     ),
 ) -> None:
     """Index PDF files into the FAISS vector store."""
     from paperrag.chunker import chunk_paper
     from paperrag.embedder import Embedder
-    from paperrag.parser import compute_file_hashes_parallel, discover_pdfs, parse_pdf, load_manifest
+    from paperrag.parser import (
+        compute_file_hashes_parallel,
+        discover_pdfs,
+        parse_pdf,
+        load_manifest,
+    )
     from paperrag.parallel import parallel_process_pdfs
     from paperrag.vectorstore import VectorStore
 
@@ -240,7 +298,9 @@ def index(
     elif not global_rc.get("input-dir") and not local_rc.get("input-dir"):
         console.print("[red]Error: --input-dir (-d) is required[/red]")
         console.print("Usage: paperrag index --input-dir <path> [--index-dir <path>]")
-        console.print("[dim]Tip: set input-dir in ~/.paperragrc to skip this flag[/dim]")
+        console.print(
+            "[dim]Tip: set input-dir in ~/.paperragrc to skip this flag[/dim]"
+        )
         raise typer.Exit(1)
 
     if index_dir:
@@ -249,7 +309,7 @@ def index(
         cfg.indexing.checkpoint_interval = checkpoint_interval
     if workers is not None:
         cfg.indexing.n_workers = workers
-    
+
     # Set OCR mode with validation
     ocr_lower = ocr.lower()
     if ocr_lower in ["auto", "always", "never"]:
@@ -261,7 +321,9 @@ def index(
         elif ocr_lower == "always":
             console.print("[yellow]📄 OCR enabled for all PDFs[/yellow]")
     else:
-        console.print(f"[red]Invalid OCR mode: {ocr}. Use 'auto', 'always', or 'never'.[/red]")
+        console.print(
+            f"[red]Invalid OCR mode: {ocr}. Use 'auto', 'always', or 'never'.[/red]"
+        )
         raise typer.Exit(1)
 
     pdf_dir = Path(cfg.input_dir)
@@ -285,9 +347,7 @@ def index(
     if VectorStore.exists(idx_dir) and not force:
         store = VectorStore.load(idx_dir)
         if store.dimension != embedder.dimension:
-            console.print(
-                "[yellow]Dimension mismatch - rebuilding index.[/yellow]"
-            )
+            console.print("[yellow]Dimension mismatch - rebuilding index.[/yellow]")
             store = VectorStore(idx_dir, embedder.dimension)
     else:
         store = VectorStore(idx_dir, embedder.dimension)
@@ -301,14 +361,16 @@ def index(
             store.remove_by_file(fp)
             del store.file_hashes[fp]
         if stale:
-            console.print(f"Removed [red]{len(stale)}[/red] deleted file(s) from index.")
+            console.print(
+                f"Removed [red]{len(stale)}[/red] deleted file(s) from index."
+            )
 
     # Determine which files need (re)indexing - use parallel hashing
     if workers is None:
         n_workers = cfg.indexing.get_n_workers()
     else:
         n_workers = workers if workers > 0 else 1
-    
+
     cfg.indexing.n_workers = n_workers
 
     console.print(f"Computing hashes for {len(pdfs)} PDFs with {n_workers} workers...")
@@ -343,9 +405,11 @@ def index(
     total_successes = 0
     total_failures = 0
     failed_pdfs: list[tuple[str, str]] = []  # (pdf_path, error_message)
-    
-    console.print(f"Indexing [cyan]{total_files}[/cyan] PDF(s) in batches of {BATCH_SIZE}...")
-    
+
+    console.print(
+        f"Indexing [cyan]{total_files}[/cyan] PDF(s) in batches of {BATCH_SIZE}..."
+    )
+
     # Show memory and worker info for transparency
     try:
         mem = psutil.virtual_memory()
@@ -358,8 +422,10 @@ def index(
                 "[yellow]⚠ Low memory detected. If indexing fails, try: --workers 2[/yellow]"
             )
     except Exception:
-        console.print(f"Using [green]{n_workers}[/green] worker(s) for parallel processing.")
-    
+        console.print(
+            f"Using [green]{n_workers}[/green] worker(s) for parallel processing."
+        )
+
     # Helper function to log memory usage
     def log_memory():
         if cfg.indexing.log_memory_usage:
@@ -368,16 +434,16 @@ def index(
             logger.info(
                 "Memory usage: RSS=%.1f MB, VMS=%.1f MB",
                 mem_info.rss / 1024 / 1024,
-                mem_info.vms / 1024 / 1024
+                mem_info.vms / 1024 / 1024,
             )
-    
+
     for i in range(0, total_files, BATCH_SIZE):
         batch = to_index[i : i + BATCH_SIZE]
         batch_num = i // BATCH_SIZE + 1
         total_batches = (total_files + BATCH_SIZE - 1) // BATCH_SIZE
-        
+
         console.print(f"\nBatch {batch_num}/{total_batches} ({len(batch)} files)...")
-        
+
         # Memory guard: warn if running low before processing batch
         try:
             mem = psutil.virtual_memory()
@@ -388,41 +454,46 @@ def index(
                 )
         except Exception:
             pass
-        
+
         log_memory()
-        
+
         # Parallel parse + chunk phase for this batch
         parsed_results = parallel_process_pdfs(
-            batch,
-            cfg.parser,
-            cfg.chunker,
-            n_workers,
-            timeout=cfg.indexing.pdf_timeout
+            batch, cfg.parser, cfg.chunker, n_workers, timeout=cfg.indexing.pdf_timeout
         )
 
         # Sequential embed + add phase with comprehensive error handling
         batch_chunks = 0
         batch_successes = 0
         batch_failures = 0
-        
-        for pdf_path, file_hash, chunks, error in tqdm(parsed_results, desc="Embedding", unit="file"):
+
+        for pdf_path, file_hash, chunks, error in tqdm(
+            parsed_results, desc="Embedding", unit="file"
+        ):
             # Handle parsing errors
             if error:
                 logger.error("Failed to parse %s: %s", pdf_path.name, error)
                 failed_pdfs.append((str(pdf_path), f"Parse error: {error}"))
                 batch_failures += 1
                 total_failures += 1
-                
+
                 # Check if we've exceeded max failures
-                if cfg.indexing.max_failures > 0 and total_failures >= cfg.indexing.max_failures:
-                    console.print(f"[red]Reached maximum failures ({cfg.indexing.max_failures}). Stopping.[/red]")
+                if (
+                    cfg.indexing.max_failures > 0
+                    and total_failures >= cfg.indexing.max_failures
+                ):
+                    console.print(
+                        f"[red]Reached maximum failures ({cfg.indexing.max_failures}). Stopping.[/red]"
+                    )
                     break
-                
+
                 if not cfg.indexing.continue_on_error:
-                    console.print("[red]Stopping due to error (continue_on_error=False)[/red]")
+                    console.print(
+                        "[red]Stopping due to error (continue_on_error=False)[/red]"
+                    )
                     raise typer.Exit(1)
                 continue
-            
+
             if not chunks:
                 logger.warning("No chunks produced for %s", pdf_path.name)
                 failed_pdfs.append((str(pdf_path), "No chunks produced"))
@@ -440,29 +511,38 @@ def index(
                 batch_successes += 1
                 total_successes += 1
             except Exception as e:
-                logger.error("Failed to embed/store %s: %s", pdf_path.name, e, exc_info=True)
+                logger.error(
+                    "Failed to embed/store %s: %s", pdf_path.name, e, exc_info=True
+                )
                 failed_pdfs.append((str(pdf_path), f"Embedding error: {e}"))
                 batch_failures += 1
                 total_failures += 1
-                
+
                 # Check if we've exceeded max failures
-                if cfg.indexing.max_failures > 0 and total_failures >= cfg.indexing.max_failures:
-                    console.print(f"[red]Reached maximum failures ({cfg.indexing.max_failures}). Stopping.[/red]")
+                if (
+                    cfg.indexing.max_failures > 0
+                    and total_failures >= cfg.indexing.max_failures
+                ):
+                    console.print(
+                        f"[red]Reached maximum failures ({cfg.indexing.max_failures}). Stopping.[/red]"
+                    )
                     break
-                
+
                 if not cfg.indexing.continue_on_error:
-                    console.print("[red]Stopping due to error (continue_on_error=False)[/red]")
+                    console.print(
+                        "[red]Stopping due to error (continue_on_error=False)[/red]"
+                    )
                     raise typer.Exit(1)
                 continue
 
         total_chunks += batch_chunks
-        
+
         # Report batch statistics
         console.print(
             f"Batch {batch_num} complete: [green]{batch_successes} succeeded[/green], "
             f"[red]{batch_failures} failed[/red], {batch_chunks} chunks added"
         )
-        
+
         # Save after every batch for resumption with retry logic
         max_retries = 3
         save_success = False
@@ -477,22 +557,32 @@ def index(
                 break
             except Exception as e:
                 if retry < max_retries - 1:
-                    logger.warning("Failed to save index (attempt %d/%d): %s", retry + 1, max_retries, e)
+                    logger.warning(
+                        "Failed to save index (attempt %d/%d): %s",
+                        retry + 1,
+                        max_retries,
+                        e,
+                    )
                 else:
-                    logger.error("Failed to save index after %d attempts: %s", max_retries, e)
-        
+                    logger.error(
+                        "Failed to save index after %d attempts: %s", max_retries, e
+                    )
+
         if not save_success:
             console.print("[red]Critical: Failed to save index checkpoint![/red]")
             if not cfg.indexing.continue_on_error:
                 raise typer.Exit(1)
-        
+
         # Memory cleanup between batches
         if cfg.indexing.enable_gc_per_batch:
             gc.collect()
             log_memory()
-        
+
         # Check if we should stop due to max failures
-        if cfg.indexing.max_failures > 0 and total_failures >= cfg.indexing.max_failures:
+        if (
+            cfg.indexing.max_failures > 0
+            and total_failures >= cfg.indexing.max_failures
+        ):
             break
 
     # Final index save
@@ -510,29 +600,52 @@ def index(
         console.print(f"\n[yellow]Failed PDFs logged to: {failed_log_path}[/yellow]")
 
     # Final summary
-    console.print("\n" + "="*60)
+    console.print("\n" + "=" * 60)
     console.print("[bold]Indexing Summary[/bold]")
-    console.print("="*60)
+    console.print("=" * 60)
     console.print(f"Total PDFs processed: {total_files}")
     console.print(f"  [green]✓ Successful: {total_successes}[/green]")
     console.print(f"  [red]✗ Failed: {total_failures}[/red]")
     console.print(f"Total chunks indexed: {total_chunks}\n")
     console.print(f"Index version: {store.version}")
-    console.print("="*60)
+    console.print("=" * 60)
 
 
 # -- review ----------------------------------------------------------------
 @app.command()
 def review(
     input_path: str = typer.Argument(..., help="PDF file or directory to review"),
-    index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: auto-derived from input path)"),
-    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
-    topk: int = typer.Option(None, "--top-k", "--topk", "-k", help="Number of chunks to retrieve for context (default: 3)"),
-    threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
-    temperature: float = typer.Option(None, "--temperature", "--temp",  help="LLM temperature (0.0-2.0, default: 0.0)"),
-    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
-    ctx_size: int = typer.Option(None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"),
-    system_prompt: str = typer.Option(None, "--system-prompt", "--prompt", help="LLM system prompt"),
+    index_dir: str = typer.Option(
+        None,
+        "--index-dir",
+        "-i",
+        help="Index directory (default: auto-derived from input path)",
+    ),
+    model: str = typer.Option(
+        None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"
+    ),
+    topk: int = typer.Option(
+        None,
+        "--top-k",
+        "--topk",
+        "-k",
+        help="Number of chunks to retrieve for context (default: 3)",
+    ),
+    threshold: float = typer.Option(
+        None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"
+    ),
+    temperature: float = typer.Option(
+        None, "--temperature", "--temp", help="LLM temperature (0.0-2.0, default: 0.0)"
+    ),
+    max_tokens: int = typer.Option(
+        None, "--max-tokens", help="LLM max output tokens (default: 256)"
+    ),
+    ctx_size: int = typer.Option(
+        None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"
+    ),
+    system_prompt: str = typer.Option(
+        None, "--system-prompt", "--prompt", help="LLM system prompt"
+    ),
 ) -> None:
     """Index a PDF file (or directory) and start an interactive review session.
 
@@ -587,6 +700,7 @@ def review(
 
     # Validate that PDFs can be found before indexing
     from paperrag.parser import discover_pdfs
+
     pdfs = discover_pdfs(path_obj)
     if not pdfs:
         console.print(f"[red]Error: No PDFs found at {input_path}[/red]")
@@ -606,14 +720,30 @@ def review(
 def query(
     question: str = typer.Argument(..., help="Your question"),
     top_k: int = typer.Option(3, "--top-k", "-k"),
-    threshold: float = typer.Option(None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"),
-    temperature: float = typer.Option(None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"),
-    max_tokens: int = typer.Option(None, "--max-tokens", help="LLM max output tokens (default: 256)"),
-    ctx_size: int = typer.Option(None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"),
-    system_prompt: str = typer.Option(None, "--system-prompt", "--prompt", help="LLM system prompt"),
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
-    index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (required)"),
-    model: str = typer.Option(None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"),
+    threshold: float = typer.Option(
+        None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"
+    ),
+    temperature: float = typer.Option(
+        None, "--temperature", help="LLM temperature (0.0-2.0, default: 0.0)"
+    ),
+    max_tokens: int = typer.Option(
+        None, "--max-tokens", help="LLM max output tokens (default: 256)"
+    ),
+    ctx_size: int = typer.Option(
+        None, "--ctx-size", min=512, help="LLM context window size (default: 2048)"
+    ),
+    system_prompt: str = typer.Option(
+        None, "--system-prompt", "--prompt", help="LLM system prompt"
+    ),
+    input_dir: str = typer.Option(
+        None, "--input-dir", "-d", help="PDF directory or single PDF file"
+    ),
+    index_dir: str = typer.Option(
+        None, "--index-dir", "-i", help="Index directory (required)"
+    ),
+    model: str = typer.Option(
+        None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"
+    ),
 ) -> None:
     """Query the indexed papers."""
     from paperrag.retriever import Retriever
@@ -633,7 +763,9 @@ def query(
     if not effective_index_dir:
         console.print("[red]Error: --index-dir is required for query command[/red]")
         console.print("Usage: paperrag query <question> --index-dir <path> [options]")
-        console.print("[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]")
+        console.print(
+            "[dim]Tip: set index-dir in ~/.paperragrc to skip this flag[/dim]"
+        )
         raise typer.Exit(1)
 
     if input_dir:
@@ -676,6 +808,7 @@ def query(
         raise typer.Exit(1)
 
     import time
+
     t0 = time.perf_counter()
     results = retriever.retrieve(question, top_k=top_k)
     t_retrieval = time.perf_counter() - t0
@@ -698,7 +831,9 @@ def query(
     for file_path, label in seen_files.items():
         filename = PathlibPath(file_path).name
         best_score = max(r.score for r in results if r.file_path == file_path)
-        console.print(f"  [cyan][{label}][/cyan] {filename} [dim]({best_score:.2f})[/dim]")
+        console.print(
+            f"  [cyan][{label}][/cyan] {filename} [dim]({best_score:.2f})[/dim]"
+        )
 
     context_chunks = [r.text for r in results]
     source_files = [r.file_path for r in results]
@@ -706,7 +841,9 @@ def query(
         full_answer = ""
         header_printed = False
         t1 = time.perf_counter()
-        for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files):
+        for chunk in stream_answer(
+            question, context_chunks, cfg.llm, source_files=source_files
+        ):
             if not header_printed:
                 console.print("\n[bold green]Answer:[/bold green]")
                 header_printed = True
@@ -717,7 +854,9 @@ def query(
         sys.stdout.flush()
         t_llm = time.perf_counter() - t1
         t_total = time.perf_counter() - t0
-        console.print(f"\n[dim]Retrieval: {t_retrieval:.2f}s | LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n")
+        console.print(
+            f"\n[dim]Retrieval: {t_retrieval:.2f}s | LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n"
+        )
 
     except ImportError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
@@ -726,6 +865,7 @@ def query(
         console.print(f"\n[dim]💡 {exc}[/dim]")
     except Exception as exc:
         from paperrag.llm import describe_llm_error
+
         error_msg, hint = describe_llm_error(exc, cfg.llm.model_name)
         console.print(f"[red]{error_msg}[/red]")
         if hint:
@@ -737,8 +877,15 @@ def query(
 def evaluate(
     benchmark_file: str = typer.Argument(..., help="JSONL benchmark file"),
     top_k: int = typer.Option(3, "--top-k", "-k"),
-    input_dir: str = typer.Option(None, "--input-dir", "-d", help="PDF directory or single PDF file"),
-    index_dir: str = typer.Option(None, "--index-dir", "-i", help="Index directory (default: <input-dir>/.paperrag-index)"),
+    input_dir: str = typer.Option(
+        None, "--input-dir", "-d", help="PDF directory or single PDF file"
+    ),
+    index_dir: str = typer.Option(
+        None,
+        "--index-dir",
+        "-i",
+        help="Index directory (default: <input-dir>/.paperrag-index)",
+    ),
 ) -> None:
     """Evaluate retrieval quality using a JSONL benchmark.
 
@@ -769,6 +916,210 @@ def evaluate(
     console.print("\n[bold]Evaluation Results[/bold]")
     for metric, value in results.items():
         console.print(f"  {metric}: {value:.4f}")
+
+
+@app.command()
+def export(
+    query: str = typer.Option(None, "--query", "-q", help="Question to query"),
+    output_path: str = typer.Option(..., "--output", help="Output file path"),
+    format: str = typer.Option(
+        "markdown", "--format", help="Export format (markdown, csv, json)"
+    ),
+    top_k: int = typer.Option(3, "--top-k", "-k"),
+    threshold: float = typer.Option(
+        None, "--threshold", "-t", help="Minimum similarity score threshold (0.0-1.0)"
+    ),
+    input_dir: str = typer.Option(
+        None, "--input-dir", "-d", help="PDF directory or single PDF file"
+    ),
+    index_dir: str = typer.Option(
+        None,
+        "--index-dir",
+        "-i",
+        help="Index directory (default: <input-dir>/.paperrag-index)",
+    ),
+) -> None:
+    """Export query results to a file.
+
+    Retrieves and saves results in the specified format.
+    """
+    from paperrag.retriever import Retriever
+
+    # Prompt for query if not provided
+    if not query:
+        query = typer.prompt("Question", type=str)
+
+    if query.strip() == "":
+        console.print("[red]Error: Question cannot be empty[/red]")
+        raise typer.Exit(1)
+
+    cfg = PaperRAGConfig()
+    if input_dir:
+        cfg.input_dir = input_dir
+    if index_dir:
+        cfg.index_dir = index_dir
+
+    # Resolve effective index_dir
+    if not cfg._index_dir:
+        console.print("[red]Error: --index-dir is required for export command[/red]")
+        raise typer.Exit(1)
+
+    try:
+        retriever = Retriever(cfg)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    # Get retrieval results
+    results = retriever.retrieve(
+        query,
+        top_k=top_k,
+    )
+
+    # Convert results for export
+    from paperrag.export import export_results
+
+    output_path = Path(output_path)
+    export_results(results, output_path, format)
+
+    console.print(f"[green]✓ Exported {len(results)} results to {output_path}[/green]")
+
+
+# -- status ----------------------------------------------------------
+@app.command()
+def status(
+    index_dir: str = typer.Option(
+        None,
+        "--index-dir",
+        "-i",
+        help="Index directory (auto-discovered if not provided)",
+    ),
+) -> None:
+    """Show index health information."""
+    from paperrag.parser import compute_file_hash, discover_pdfs
+    from paperrag.vectorstore import VectorStore
+
+    cfg = PaperRAGConfig()
+
+    if index_dir:
+        cfg.index_dir = index_dir
+
+    idx_path = Path(cfg.index_dir).resolve()
+
+    if not VectorStore.exists(idx_path):
+        console.print("[red]No index found at specified location.[/red]")
+        console.print("[dim]Use 'paperrag index' to create an index first.[/dim]")
+        raise typer.Exit(1)
+
+    try:
+        store = VectorStore.load(idx_path)
+    except Exception as e:
+        console.print(f"[red]Error loading index: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Create status table
+    table = Table(title="✓ [bold]Index Status[/bold]")
+    table.add_column("Metric", style="cyan", width=30)
+    table.add_column("Value", style="green")
+
+    # Vector count
+    table.add_row("Vectors in index", str(store.index.ntotal))
+    table.add_row("Indexed PDFs", str(len(store.file_hashes)))
+    table.add_row("Index version", str(store.version))
+    table.add_row("Embedding dimension", str(store.dimension))
+
+    # Disk size
+    try:
+        index_size = idx_path.stat().st_size
+        if index_size >= 10 * 1024 * 1024:
+            size_str = f"{index_size / (1024 * 1024):.1f} MB"
+        elif index_size >= 1024 * 1024:
+            size_str = f"{index_size / 1024 / 1024:.2f} MB"
+        else:
+            size_str = f"{index_size / 1024:.2f} KB"
+
+        table.add_row("Estimated size", size_str)
+    except Exception:
+        table.add_row("Estimated size", "Unknown")
+
+    # Timestamp
+    try:
+        timestamp = datetime.datetime.fromtimestamp(idx_path.stat().st_mtime).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        table.add_row("Last modified", timestamp)
+    except Exception:
+        pass
+
+    console.print("\n" + "=" * 60)
+    console.print(table)
+    console.print("=" * 60 + "\n")
+
+    # Check for files out of sync
+    if cfg.input_dir:
+        pdf_dir = Path(cfg.input_dir)
+        try:
+            pdfs = discover_pdfs(pdf_dir)
+
+            if pdfs:
+                if not VectorStore.exists(idx_path / ".paperrag-index"):
+                    console.print(
+                        "[yellow]⚠ Index directory not found. Auto-discovery enabled.[/yellow]"
+                    )
+                    idx_path = idx_path / ".paperrag-index"
+                    if not VectorStore.exists(idx_path):
+                        console.print(
+                            "[yellow]ℹ No index found in either location.[/yellow]"
+                        )
+                        raise typer.Exit(0)
+
+                # Detect modified/deleted files
+                current_paths = {str(p) for p in pdfs}
+                stored_hashes = set(store.file_hashes.keys())
+
+                modified = []
+                deleted = []
+
+                for pdf_path in pdfs:
+                    path_str = str(pdf_path)
+                    stored_hash = store.get_file_hash(path_str)
+
+                    if stored_hash is None:
+                        deleted.append(pdf_path.name)
+                    else:
+                        # Check if hash has changed by comparing against disk
+                        disk_hash = compute_file_hash(pdf_path)
+                        if stored_hash != disk_hash:
+                            modified.append(pdf_path.name)
+
+                if not modified and not deleted:
+                    console.print("[green]✓ Index is fully up-to-date[/green]")
+                else:
+                    if modified:
+                        console.print(
+                            f"[yellow]⚠ {len(modified)} file(s) have been modified[/yellow]"
+                        )
+                        for name in modified[:5]:
+                            console.print(f"    - {name}")
+                        if len(modified) > 5:
+                            console.print(f"    ... and {len(modified) - 5} more")
+
+                    if deleted:
+                        console.print(
+                            f"[red]✗ {len(deleted)} file(s) have been deleted[/red]"
+                        )
+                        for name in deleted[:5]:
+                            console.print(f"    - {name}")
+                        if len(deleted) > 5:
+                            console.print(f"    ... and {len(deleted) - 5} more")
+            else:
+                console.print("[yellow]ℹ No PDFs found in input directory.[/yellow]")
+        except Exception as e:
+            console.print(f"[red]Error checking file sync: {e}[/red]")
+    else:
+        console.print(
+            "[yellow]ℹ No input directory configured. Run 'paperrag index --help' to set one.[/yellow]"
+        )
 
 
 def main() -> None:
