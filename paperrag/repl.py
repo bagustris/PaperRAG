@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.table import Table
 
 from paperrag import __version__
-from paperrag.config import PaperRAGConfig, load_rc
+from paperrag.config import PaperRAGConfig, load_rc, PROMPT_PRESETS, PRESET_MAX_TOKENS
 
 console = Console()
 
@@ -33,6 +33,8 @@ SLASH_COMMANDS: list[str] = [
     "/n-gpu-layers",
     "/n-threads",
     "/prompt",
+    "/preset",
+    "/export",
     "/model",
     "/config",
     "/rc",
@@ -55,13 +57,16 @@ HELP_TEXT = """\
   [cyan]/n-gpu-layers <n>[/cyan]       Set GPU layers for llama.cpp backend (0 = CPU only)
   [cyan]/n-threads <n>[/cyan]          Set CPU threads for llama.cpp backend (0 = auto)
   [cyan]/prompt <text>[/cyan]          Set LLM system prompt
+  [cyan]/preset <name>[/cyan]         Switch to a named prompt preset: default, reviewer, summarizer, explainer
+  [cyan]/export[/cyan]                 Export this session's Q&A to a markdown file (auto-named)
+  [cyan]/export <path>[/cyan]          Export to a specific file path
   [cyan]/model <name>[/cyan]           Set LLM model name
   [cyan]/config[/cyan]                 Show current configuration
   [cyan]/rc[/cyan]                     Show loaded .paperragrc files and values
   [cyan]/help[/cyan]                   Show this help message
   [cyan]/exit[/cyan] / [cyan]/quit[/cyan]              Exit the REPL
 
-[dim]Tip: type [bold]/[/bold] and press Tab to see a list of all commands.[/dim]
+[dim]Tip: type [bold]/[/bold] + Tab for autocomplete. In review mode, try [cyan]/preset reviewer[/cyan] then [cyan]/export[/cyan] to save your review.[/dim]
 """
 
 
@@ -84,7 +89,13 @@ class _SlashCompleter(Completer):
                 # Yield the remainder so it appends to what's already typed
                 yield Completion(cmd[len(word):], start_position=0, display=cmd)
 
-def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" = None) -> None:
+def start_repl(
+    cfg: PaperRAGConfig | None = None,
+    *,
+    auto_focus: "Path | None" = None,
+    review_mode: bool = False,
+    output_path: "Path | None" = None,
+) -> None:
     """Launch the interactive REPL session."""
     cfg = cfg or PaperRAGConfig()
     pdf_dir = Path(cfg.input_dir)
@@ -139,10 +150,17 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
         sys.exit(1)
 
     console.print(f"LLM: [cyan]{cfg.llm.model_name}[/cyan]  [dim]top-k={cfg.retriever.top_k} threshold={cfg.retriever.score_threshold} — /config for all settings[/dim]")
-    console.print("Type [cyan]/help[/cyan] for commands, or [cyan]/[/cyan] + Tab for autocomplete.\n")
+    if review_mode:
+        console.print(
+            "Switch prompts: [cyan]/preset reviewer[/cyan] (or summarizer, explainer). "
+            "Custom: [cyan]/prompt <text>[/cyan]. Save session: [cyan]/export[/cyan].\n"
+        )
+    else:
+        console.print("Type [cyan]/help[/cyan] for commands, or [cyan]/[/cyan] + Tab for autocomplete.\n")
 
     top_k = cfg.retriever.top_k
     focused_file: str | None = None
+    session_log: list[dict] = []  # tracks Q&A pairs for /export
 
     # Eagerly load the retriever (including embedding model) at startup
     # so the first query doesn't pay the ~6s model-loading penalty.
@@ -203,6 +221,9 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
             command = session.prompt(prompt_text).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\nBye!")
+            if output_path and session_log:
+                _export_session(session_log, output_path, focused_file=focused_file, cfg=cfg)
+                console.print(f"[green]Session saved to {output_path}[/green]")
             break
 
         if not command:
@@ -210,6 +231,9 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
 
         if command in ("/exit", "/quit"):
             console.print("Bye!")
+            if output_path and session_log:
+                _export_session(session_log, output_path, focused_file=focused_file, cfg=cfg)
+                console.print(f"[green]Session saved to {output_path}[/green]")
             break
 
         if command == "/help":
@@ -364,6 +388,40 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
                 console.print("[yellow]Usage: /prompt <text>[/yellow]")
             continue
 
+        if cmd_parts[0] == "/preset":
+            if len(cmd_parts) == 2:
+                name = cmd_parts[1].strip().lower()
+                if name in PROMPT_PRESETS:
+                    cfg.llm.system_prompt = PROMPT_PRESETS[name]
+                    cfg.llm.max_tokens = PRESET_MAX_TOKENS.get(name, cfg.llm.max_tokens)
+                    console.print(
+                        f"Preset [cyan]{name}[/cyan] active. "
+                        f"[dim]max_tokens={cfg.llm.max_tokens}[/dim]"
+                    )
+                    console.print(f"[dim]Prompt: {cfg.llm.system_prompt[:80]}...[/dim]")
+                else:
+                    valid = ", ".join(PROMPT_PRESETS.keys())
+                    console.print(f"[yellow]Unknown preset '{name}'. Valid: {valid}[/yellow]")
+            else:
+                valid = ", ".join(PROMPT_PRESETS.keys())
+                console.print(f"[yellow]Usage: /preset <name>  (valid: {valid})[/yellow]")
+            continue
+
+        if cmd_parts[0] == "/export":
+            if not session_log:
+                console.print("[yellow]No Q&A in this session yet.[/yellow]")
+                continue
+            if len(cmd_parts) == 2:
+                export_path = Path(cmd_parts[1].strip())
+            else:
+                import datetime as _dt
+                stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                paper_stem = Path(focused_file).stem if focused_file else "session"
+                export_path = Path(f"{paper_stem}_review_{stamp}.md")
+            _export_session(session_log, export_path, focused_file=focused_file, cfg=cfg)
+            console.print(f"[green]Session exported to {export_path}[/green]")
+            continue
+
         if cmd_parts[0] == "/model":
             if len(cmd_parts) == 2:
                 cfg.llm.model_name = cmd_parts[1]
@@ -382,6 +440,11 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
             console.print(f"  GPU layers (llama.cpp): [cyan]{cfg.llm.n_gpu_layers}[/cyan]")
             n_threads_label = str(cfg.llm.n_threads) if cfg.llm.n_threads > 0 else f"auto ({os.cpu_count()})"
             console.print(f"  CPU threads (llama.cpp): [cyan]{n_threads_label}[/cyan]")
+            active_preset = next(
+                (k for k, v in PROMPT_PRESETS.items() if v == cfg.llm.system_prompt), None
+            )
+            if active_preset:
+                console.print(f"  Active preset: [cyan]{active_preset}[/cyan]")
             console.print(f"  System prompt: [dim]{cfg.llm.system_prompt}[/dim]")
             console.print("[bold]Retrieval:[/bold]")
             console.print(f"  Top-k: [cyan]{cfg.retriever.top_k}[/cyan]")
@@ -419,7 +482,9 @@ def start_repl(cfg: PaperRAGConfig | None = None, *, auto_focus: "Path | None" =
         retriever = _ensure_retriever(retriever, cfg)
         if retriever is None:
             continue
-        _handle_query(command, retriever, cfg, top_k=top_k, focused_file=focused_file)
+        entry = _handle_query(command, retriever, cfg, top_k=top_k, focused_file=focused_file)
+        if entry is not None:
+            session_log.append(entry)
 
 
 def _ensure_retriever(retriever, cfg: PaperRAGConfig, store=None):
@@ -442,8 +507,11 @@ def _handle_query(
     *,
     top_k: int,
     focused_file: str | None = None,
-) -> None:
-    """Run retrieval and LLM for a user question."""
+) -> "dict | None":
+    """Run retrieval and LLM for a user question.
+
+    Returns a session log entry dict on success, or None if no results / error.
+    """
     import time
 
     t0 = time.perf_counter()
@@ -455,7 +523,7 @@ def _handle_query(
         if cfg.retriever.score_threshold > 0.1:
             msg += f" [dim](threshold={cfg.retriever.score_threshold} — try /threshold 0.1 to widen the search)[/dim]"
         console.print(msg)
-        return
+        return None
 
     # Show retrieved sources immediately so the user sees useful info
     # while waiting for the LLM to generate.
@@ -470,6 +538,7 @@ def _handle_query(
         best_score = max(r.score for r in results if r.file_path == file_path)
         console.print(f"  [cyan][{label}][/cyan] {filename} [dim]({best_score:.2f})[/dim]")
 
+    full_answer = ""
     try:
         import sys
 
@@ -477,7 +546,6 @@ def _handle_query(
 
         context_chunks = [r.text for r in results]
         source_files = [r.file_path for r in results]
-        full_answer = ""
         header_printed = False
         t1 = time.perf_counter()
         for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files):
@@ -495,15 +563,24 @@ def _handle_query(
 
     except ImportError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
+        return None
     except ValueError as exc:
         # LLM not configured - this is fine, just skip it
         console.print(f"\n[dim]💡 {exc}[/dim]\n")
+        return None
     except Exception as exc:
         from paperrag.llm import describe_llm_error
         error_msg, hint = describe_llm_error(exc, cfg.llm.model_name)
         console.print(f"[red]{error_msg}[/red]")
         if hint:
             console.print(f"[yellow]Fix: {hint}[/yellow]")
+        return None
+
+    return {
+        "question": question,
+        "answer": full_answer,
+        "sources": [Path(fp).name for fp in seen_files],
+    }
 
 
 def _handle_index(cfg: PaperRAGConfig) -> None:
@@ -621,3 +698,41 @@ def _handle_index(cfg: PaperRAGConfig) -> None:
         f"[green]Done![/green] Indexed {total_chunks} chunks from "
         f"{len(to_index)} file(s). Index version: {store.version}"
     )
+
+
+def _export_session(
+    session_log: list[dict],
+    output_path: "Path",
+    *,
+    focused_file: "str | None" = None,
+    cfg: "PaperRAGConfig | None" = None,
+) -> None:
+    """Write the session Q&A log to a markdown file."""
+    import datetime as _dt
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    paper_name = Path(focused_file).name if focused_file else "Multiple papers"
+    preset = None
+    if cfg is not None:
+        preset = next((k for k, v in PROMPT_PRESETS.items() if v == cfg.llm.system_prompt), None)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(f"# PaperRAG Review Session\n\n")
+        f.write(f"**Paper:** {paper_name}  \n")
+        f.write(f"**Date:** {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')}  \n")
+        if preset:
+            f.write(f"**Preset:** {preset}  \n")
+        if cfg is not None:
+            f.write(f"**Model:** {cfg.llm.model_name}  \n")
+        f.write("\n---\n\n")
+
+        for i, entry in enumerate(session_log, 1):
+            f.write(f"## Q{i}: {entry['question']}\n\n")
+            if entry.get("sources"):
+                sources_str = ", ".join(entry["sources"])
+                f.write(f"*Sources: {sources_str}*\n\n")
+            f.write(f"{entry['answer']}\n\n")
+            if i < len(session_log):
+                f.write("---\n\n")

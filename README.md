@@ -12,8 +12,10 @@ Deepwiki:  https://deepwiki.com/bagustris/PaperRAG
 - Structured PDF parsing with adaptive OCR (auto-detects per file)
 - Section-aware chunking and FAISS vector store
 - Local LLM via Ollama — fully offline
-- Interactive REPL for fast multi-query sessions
-- Deterministic, reproducible indexing
+- Interactive REPL with prompt presets, session export, and config inspection
+- Single-PDF review mode with autofocus on the active paper
+- Deterministic, reproducible indexing with auto-discovered `.paperrag-index`
+- Default input directory at `~/Documents/Mendeley Desktop/` for local collections
 
 ------------------------------------------------------------------------
 
@@ -102,23 +104,39 @@ Use a local GGUF file through `llama.cpp`:
 
 ## Usage
 
-### Index your PDFs (first time)
+### Index a PDF directory or single PDF
 
     paperrag index -d /path/to/pdfs
+    paperrag index -d /path/to/paper.pdf
 
-### Query (interactive REPL — recommended)
+### Open the interactive REPL
 
-    paperrag -i /path/to/pdfs
+If you already have an index in the current project, you can run:
 
-### Query (single question)
+    paperrag
 
-    paperrag query "what is speech chain?" -i /path/to/pdfs
+Or point to the index directory explicitly:
+
+    paperrag -i /path/to/.paperrag-index
+
+### Query a single question
+
+    paperrag query "what is speech chain?" -i /path/to/.paperrag-index
+
+### Review a single paper
+
+    paperrag review /path/to/paper.pdf --preset reviewer --output review.md
+
+### Export query results
+
+    paperrag export -q "what is speech chain?" -i /path/to/.paperrag-index -o results.md
+    paperrag export -q "what is speech chain?" -i /path/to/.paperrag-index -o results.csv --format csv
 
 #### Example  
 
 ```bash 
-$ paperrag index -d test_pdfs  
-$ paperrag -i test_pdfs -m qwen2.5:1.5b  
+$ paperrag index -d test_pdfs
+$ paperrag -i test_pdfs/.paperrag-index -m qwen2.5:1.5b
 paperag> What is speech chain?  
 
 Sources (0.05s)
@@ -145,13 +163,16 @@ Retrieval: 0.05s | LLM: 8.65s | Total: 8.69s
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--index-dir, -i` | — | Index directory (required) |
-| `--input-dir, -d` | — | PDF directory |
+| `--index-dir, -i` | — | Index directory (required for query/export; auto-discovered for REPL when possible) |
+| `--input-dir, -d` | `~/Documents/Mendeley Desktop/` | PDF directory or single PDF file |
 | `--model, -m` | `qwen2.5:1.5b` | Ollama model name |
-| `--topk, -k` | `2` | Chunks to retrieve |
+| `--top-k, --topk, -k` | `3` | Chunks to retrieve |
 | `--threshold, -t` | `0.1` | Minimum similarity score |
 | `--temperature` | `0.0` | LLM temperature (0=deterministic) |
+| `--ctx-size` | `2048` | LLM context window size |
 | `--max-tokens` | `256` | Max output tokens |
+
+The REPL also accepts `/preset`, `/prompt`, `/ctx-size`, `/export`, `/config`, and `/rc` for interactive tuning and session export.
 
 ------------------------------------------------------------------------
 
@@ -183,6 +204,7 @@ Create `~/.paperragrc` (global) or `.paperragrc` (per-project) in TOML format to
 index-dir = "/path/to/my-index"
 model = "qwen2.5:1.5b"
 topk = 2
+ctx-size = 2048
 ```
 
 ------------------------------------------------------------------------

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [XX.YY.ZZ: Major.Minor.Patch] - YYYY-MM-DD  
 
+## [0.6.0] - 2026-04-06
+- Added review-session export with `/export` and `--output`.
+- Added prompt presets plus custom prompt overrides via `/preset`, `/prompt`, `--preset`, and `--system-prompt`.
+- Added auto-discovery for `.paperrag-index` and a default input directory for local paper collections.
+- Added query-result export to Markdown, CSV, or JSON.
+
 ## [0.5.0] - 2026-04-04
 - Added autofocus mode for single PDF input  
 - Fixed double reference numbers in a single sources (like [1], [2]) 

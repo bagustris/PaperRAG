@@ -23,7 +23,7 @@ try:
 except RuntimeError:
     pass
 
-from paperrag.config import PaperRAGConfig, load_rc, apply_rc
+from paperrag.config import PaperRAGConfig, load_rc, apply_rc, PROMPT_PRESETS, PRESET_MAX_TOKENS
 from paperrag import __version__
 
 app = typer.Typer(
@@ -646,6 +646,18 @@ def review(
     system_prompt: str = typer.Option(
         None, "--system-prompt", "--prompt", help="LLM system prompt"
     ),
+    preset: str = typer.Option(
+        None,
+        "--preset",
+        "-p",
+        help=f"Named prompt preset: {', '.join(PROMPT_PRESETS.keys())}",
+    ),
+    output: str = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Save Q&A session to this markdown file on exit",
+    ),
 ) -> None:
     """Index a PDF file (or directory) and start an interactive review session.
 
@@ -656,6 +668,10 @@ def review(
     Examples:
 
         paperrag review paper.pdf
+
+        paperrag review paper.pdf --preset reviewer
+
+        paperrag review paper.pdf --preset reviewer --output review.md
 
         paperrag review ./papers/ --topk 5
 
@@ -698,6 +714,21 @@ def review(
     if system_prompt:
         cfg.llm.system_prompt = system_prompt
 
+    # Apply named preset (--system-prompt takes priority over --preset)
+    if preset is not None:
+        preset_lower = preset.lower()
+        if preset_lower not in PROMPT_PRESETS:
+            console.print(f"[red]Unknown preset '{preset}'. Valid: {', '.join(PROMPT_PRESETS)}[/red]")
+            raise typer.Exit(1)
+        if not system_prompt:
+            cfg.llm.system_prompt = PROMPT_PRESETS[preset_lower]
+        if max_tokens is None:
+            cfg.llm.max_tokens = PRESET_MAX_TOKENS.get(preset_lower, cfg.llm.max_tokens)
+    else:
+        # review mode: bump max_tokens to at least 512 for richer responses
+        if max_tokens is None:
+            cfg.llm.max_tokens = max(cfg.llm.max_tokens, 512)
+
     # Validate that PDFs can be found before indexing
     from paperrag.parser import discover_pdfs
 
@@ -713,7 +744,8 @@ def review(
 
     # Step 2: Start interactive review session (auto-focus when reviewing a single PDF)
     auto_focus = pdfs[0] if len(pdfs) == 1 else None
-    start_repl(cfg, auto_focus=auto_focus)
+    output_path = Path(output) if output else None
+    start_repl(cfg, auto_focus=auto_focus, review_mode=True, output_path=output_path)
 
 
 @app.command()

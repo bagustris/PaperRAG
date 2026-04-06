@@ -28,6 +28,45 @@ _RC_KEY_MAP: dict[str, tuple[str, type]] = {
 }
 
 
+# Named prompt presets for the review command.
+PROMPT_PRESETS: dict[str, str] = {
+    "default": (
+        "You are a helpful research assistant. "
+        "Answer based on the provided context. "
+        "If the context does not contain relevant information, say so. "
+        "Be concise and cite sources."
+    ),
+    "reviewer": (
+        "You are an expert peer reviewer for a top-tier academic venue. "
+        "Assess the paper with scientific rigor. "
+        "Address: (1) novelty and significance of the contribution, "
+        "(2) soundness of the methodology, "
+        "(3) quality and reproducibility of experiments, "
+        "(4) clarity of writing and presentation, "
+        "(5) limitations and potential weaknesses. "
+        "Be specific and constructive. Cite relevant paper sections."
+    ),
+    "summarizer": (
+        "You are a research analyst producing structured paper summaries. "
+        "For each answer extract: Research Question, Proposed Method, Key Results, "
+        "Limitations, and Broader Impact. Use bullet points. Cite sources."
+    ),
+    "explainer": (
+        "You are a science communicator explaining academic research to a "
+        "non-specialist audience. Avoid jargon, use analogies where helpful. "
+        "Focus on what was done, why it matters, and what was found. Cite sections."
+    ),
+}
+
+# Presets that need more output tokens than the 256 default.
+PRESET_MAX_TOKENS: dict[str, int] = {
+    "default": 256,
+    "reviewer": 512,
+    "summarizer": 512,
+    "explainer": 512,
+}
+
+
 def load_rc(path: Path) -> dict:
     """Load a .paperragrc TOML file, returning a flat dict of overrides."""
     if not path.is_file():
