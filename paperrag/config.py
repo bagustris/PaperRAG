@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 _rc_logger = logging.getLogger(__name__)
 
@@ -280,6 +280,11 @@ class PaperRAGConfig(BaseModel):
     input_dir: str = Field(default_factory=_default_input_dir)
     _index_dir: str | None = None  # Private field for custom index directory
 
+    @field_validator("input_dir", mode="before")
+    @classmethod
+    def expand_input_dir(cls, v: str) -> str:
+        return str(Path(v).expanduser()) if v else v
+
     parser: ParserConfig = Field(default_factory=ParserConfig)
     chunker: ChunkerConfig = Field(default_factory=ChunkerConfig)
     embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
@@ -300,7 +305,7 @@ class PaperRAGConfig(BaseModel):
     @index_dir.setter
     def index_dir(self, value: str) -> None:
         """Set custom index directory."""
-        self._index_dir = value
+        self._index_dir = str(Path(value).expanduser()) if value else value
 
     def snapshot(self) -> dict:
         """Return a JSON-serialisable config snapshot for index metadata."""

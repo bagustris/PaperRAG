@@ -652,6 +652,9 @@ def review(
         "-p",
         help=f"Named prompt preset: {', '.join(PROMPT_PRESETS.keys())}",
     ),
+    n_gpu_layers: int = typer.Option(
+        None, "--n-gpu-layers", "--ngl", help="GPU layers for llama.cpp (default: 0 = CPU)"
+    ),
     output: str = typer.Option(
         None,
         "--output",
@@ -713,6 +716,8 @@ def review(
         cfg.llm.ctx_size = ctx_size
     if system_prompt:
         cfg.llm.system_prompt = system_prompt
+    if n_gpu_layers is not None:
+        cfg.llm.n_gpu_layers = n_gpu_layers
 
     # Apply named preset (--system-prompt takes priority over --preset)
     if preset is not None:
