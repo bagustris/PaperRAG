@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from prompt_toolkit import HTML, PromptSession
-from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion, PathCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
@@ -62,7 +62,7 @@ HELP_TEXT = """\
   [cyan]/export[/cyan]                 Export this session's Q&A to a markdown file (auto-named)
   [cyan]/export <path>[/cyan]          Export to a specific file path
   [cyan]/think[/cyan]                  Toggle thinking/reasoning mode (for models like Qwen3, default: off)
-  [cyan]/model <name>[/cyan]           Set LLM model name
+  [cyan]/model <name>[/cyan]           Switch LLM model/backend: Ollama name, local .gguf path, or HF repo (e.g. Qwen/Qwen3-1.7B-GGUF)
   [cyan]/config[/cyan]                 Show current configuration
   [cyan]/rc[/cyan]                     Show loaded .paperragrc files and values
   [cyan]/help[/cyan]                   Show this help message
@@ -72,24 +72,48 @@ HELP_TEXT = """\
 """
 
 
+# Commands whose argument is a filesystem path (file or directory)
+_PATH_COMMANDS = {"/model", "/index", "/export"}
+
+# Commands whose argument is one of the preset names
+_PRESET_COMMAND = "/preset"
+
+
 class _SlashCompleter(Completer):
-    """Show slash-command completions when the input starts with '/'."""
+    """Show slash-command and argument completions in the REPL.
+
+    - Typing '/' + Tab completes the command name.
+    - After '/model ', '/index ', or '/export ', Tab completes filesystem paths.
+    - After '/preset ', Tab completes preset names.
+    """
+
+    def __init__(self) -> None:
+        self._path_completer = PathCompleter(expanduser=True)
 
     def get_completions(
         self, document: Document, complete_event: CompleteEvent
     ):
         text = document.text_before_cursor
-        # Only complete when the line starts with '/'
         if not text.startswith("/"):
             return
-        # Stop completing once the user has typed a space (command is finished)
+
+        # --- Argument completion (after command + space) ---
         if " " in text:
+            cmd, _, arg = text.partition(" ")
+            if cmd in _PATH_COMMANDS:
+                # Delegate to PathCompleter for the argument portion
+                arg_doc = Document(arg, cursor_position=len(arg))
+                yield from self._path_completer.get_completions(arg_doc, complete_event)
+            elif cmd == _PRESET_COMMAND:
+                for name in PROMPT_PRESETS:
+                    if name.startswith(arg):
+                        yield Completion(name[len(arg):], start_position=0, display=name)
             return
-        word = text
+
+        # --- Command name completion (no space yet) ---
         for cmd in SLASH_COMMANDS:
-            if cmd.startswith(word):
-                # Yield the remainder so it appends to what's already typed
-                yield Completion(cmd[len(word):], start_position=0, display=cmd)
+            if cmd.startswith(text):
+                yield Completion(cmd[len(text):], start_position=0, display=cmd)
 
 def start_repl(
     cfg: PaperRAGConfig | None = None,
@@ -432,19 +456,42 @@ def start_repl(
 
         if cmd_parts[0] == "/model":
             if len(cmd_parts) == 2:
-                from paperrag.llm import _is_gguf_model
+                from paperrag.llm import _is_gguf_model, _is_hf_model
                 raw = cmd_parts[1]
                 # Expand ~ for local file paths
-                expanded = str(Path(raw).expanduser()) if raw.startswith("~") else raw
-                if _is_gguf_model(expanded):
-                    if Path(expanded).is_file():
-                        cfg.llm.model_name = expanded
-                        console.print(f"LLM model found at [cyan]{expanded}[/cyan]")
+                expanded = Path(raw).expanduser()
+                expanded_str = str(expanded)
+
+                # If it's a directory, search for GGUF files inside it
+                if expanded.is_dir():
+                    gguf_files = sorted(expanded.rglob("*.gguf"))
+                    if not gguf_files:
+                        console.print(f"[red]No .gguf files found in: {expanded_str}[/red]")
+                    elif len(gguf_files) == 1:
+                        cfg.llm.model_name = str(gguf_files[0])
+                        console.print(f"Model: [cyan]{gguf_files[0].name}[/cyan]  Backend: [yellow]llama.cpp[/yellow]")
+                        if cfg.llm.n_gpu_layers == 0:
+                            console.print("[dim]Tip: /n-gpu-layers -1 to offload all layers to GPU[/dim]")
                     else:
-                        console.print(f"[red]LLM model cannot be found: {expanded}[/red]")
+                        console.print(f"[yellow]Multiple GGUF files found — pick one:[/yellow]")
+                        for i, f in enumerate(gguf_files, 1):
+                            console.print(f"  [cyan]{i}.[/cyan] {f}")
+                elif _is_gguf_model(expanded_str):
+                    if expanded.is_file():
+                        cfg.llm.model_name = expanded_str
+                        console.print(f"Model: [cyan]{expanded.name}[/cyan]  Backend: [yellow]llama.cpp[/yellow]")
+                        if cfg.llm.n_gpu_layers == 0:
+                            console.print("[dim]Tip: /n-gpu-layers -1 to offload all layers to GPU[/dim]")
+                    else:
+                        console.print(f"[red]GGUF file not found: {expanded_str}[/red]")
+                elif _is_hf_model(expanded_str):
+                    cfg.llm.model_name = expanded_str
+                    console.print(f"Model: [cyan]{expanded_str}[/cyan]  Backend: [yellow]llama.cpp[/yellow] [dim](GGUF downloaded from HuggingFace on first query)[/dim]")
+                    if cfg.llm.n_gpu_layers == 0:
+                        console.print("[dim]Tip: /n-gpu-layers -1 to offload all layers to GPU[/dim]")
                 else:
-                    cfg.llm.model_name = expanded
-                    console.print(f"LLM model set to [cyan]{expanded}[/cyan]")
+                    cfg.llm.model_name = expanded_str
+                    console.print(f"Model: [cyan]{expanded_str}[/cyan]  Backend: [green]Ollama[/green]")
             else:
                 console.print("[yellow]Usage: /model <model-name>[/yellow]")
             continue

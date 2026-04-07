@@ -86,22 +86,37 @@ def version_callback(value: bool) -> None:
 
 def _print_gpu_info() -> None:
     """Detect and display GPU availability with an Ollama inference hint."""
-    try:
-        import torch
+    import subprocess
+    import platform
 
-        if torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
+    # --- NVIDIA: use nvidia-smi (same detection path as Ollama) ---
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode == 0:
+            gpu_name = result.stdout.strip().splitlines()[0]
             console.print(
                 f"[green]GPU detected:[/green] {gpu_name} — Ollama will use it automatically for faster inference"
             )
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            console.print(
-                "[green]GPU detected:[/green] Apple Silicon MPS — Ollama will use it automatically"
-            )
-        else:
-            console.print("[dim]Running on CPU, No GPU detected[/dim]")
+            return
     except Exception:
         pass
+
+    # --- Apple Silicon MPS ---
+    if platform.system() == "Darwin":
+        try:
+            import torch
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                console.print(
+                    "[green]GPU detected:[/green] Apple Silicon MPS — Ollama will use it automatically"
+                )
+                return
+        except Exception:
+            pass
+
+    console.print("[dim]Running on CPU, No GPU detected[/dim]")
 
 
 @app.callback(invoke_without_command=True)
