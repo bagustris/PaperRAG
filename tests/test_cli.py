@@ -383,13 +383,16 @@ def test_entrypoint_warns_on_input_dir_without_subcommand(tmp_path):
 
     runner = CliRunner()
     with (
-        patch("paperrag.repl.start_repl"),
+        patch("paperrag.repl.start_repl") as mock_start_repl,
         patch("paperrag.cli.Path.cwd", return_value=tmp_path),
     ):
         result = runner.invoke(app, ["--input-dir", str(tmp_path)])
 
     assert result.exit_code == 0
     assert "--input-dir / -d does not auto-index PDFs" in result.output
+    mock_start_repl.assert_called_once()
+    cfg = mock_start_repl.call_args.args[0]
+    assert Path(cfg.input_dir) == tmp_path
 
 
 def test_entrypoint_no_warning_without_input_dir(tmp_path):
