@@ -371,9 +371,10 @@ def test_review_resets_index_dir_from_rc(tmp_path):
 
 
 def test_entrypoint_warns_on_input_dir_without_subcommand(tmp_path):
-    """paperrag -d <path> should emit a warning that -d is for indexing only."""
-    # Build a minimal valid index so the REPL entry-point can discover it,
-    # but patch start_repl so we never actually enter the interactive loop.
+    """paperrag -d <path> should warn that it does not auto-index PDFs at the entrypoint."""
+    # Build a minimal valid index so the REPL entry-point can still discover it
+    # via --input-dir, but patch start_repl so we never actually enter the
+    # interactive loop.
     index_path = tmp_path / ".paperrag-index"
     index_path.mkdir()
     store = VectorStore(index_path, 384)
