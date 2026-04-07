@@ -73,6 +73,12 @@ atexit.register(_cleanup_llama_servers)
 _MAX_CHUNK_CHARS = 750
 _TRAILING_SOURCE_LINE_RE = re.compile(r"^\s*Sources?:\s*\[[0-9,\s-]+\]\s*$", re.IGNORECASE)
 
+# Regex to strip <think>...</think> blocks produced by reasoning/thinking models
+# (e.g. Qwen3, Qwen3.5, phi4-mini-reasoning).  Handles both complete and
+# unclosed blocks (the latter can appear when the response is truncated).
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+_UNCLOSED_THINK_RE = re.compile(r"<think>.*", re.DOTALL)
+
 
 def _build_prompt(question: str, context_chunks: list[str], source_labels: list[int] | None = None) -> str:
     context_lines = []
@@ -96,6 +102,23 @@ def _build_prompt(question: str, context_chunks: list[str], source_labels: list[
     )
 
 
+def _strip_think_blocks(text: str) -> str:
+    """Remove ``<think>…</think>`` blocks from model output.
+
+    Thinking/reasoning models (e.g. Qwen3, Qwen3.5, phi4-mini-reasoning) may
+    wrap internal chain-of-thought reasoning in ``<think>`` tags.  This helper
+    strips those blocks so only the visible answer remains.
+
+    Handles both complete ``<think>…</think>`` blocks and unclosed ``<think>``
+    blocks (which can occur when the response is truncated by *max_tokens*).
+    """
+    # Strip complete think blocks first
+    result = _THINK_BLOCK_RE.sub("", text)
+    # Then strip any unclosed think block (e.g. truncated response)
+    result = _UNCLOSED_THINK_RE.sub("", result)
+    return result.strip()
+
+
 def _strip_trailing_source_footers(text: str) -> str:
     """Remove standalone trailing ``Source: [n]`` footer lines from model output."""
     lines = text.splitlines()
@@ -113,9 +136,10 @@ def _strip_trailing_source_footers(text: str) -> str:
 
 
 def _sanitize_stream(chunks: Iterator[str]) -> Iterator[str]:
-    """Buffer streamed text and remove trailing source footers before yielding."""
+    """Buffer streamed text, strip think blocks and trailing source footers."""
     text = "".join(chunks)
-    cleaned = _strip_trailing_source_footers(text)
+    cleaned = _strip_think_blocks(text)
+    cleaned = _strip_trailing_source_footers(cleaned)
     if cleaned:
         yield cleaned
 
@@ -557,7 +581,8 @@ def generate_answer(
             temperature=config.temperature,
             max_tokens=config.max_tokens,
         )
-        return _strip_trailing_source_footers(response.choices[0].message.content or "")
+        raw = response.choices[0].message.content or ""
+        return _strip_trailing_source_footers(_strip_think_blocks(raw))
 
     try:
         client, messages = _prepare(question, context_chunks, config)
@@ -573,7 +598,8 @@ def generate_answer(
         max_tokens=config.max_tokens,
         extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
     )
-    return _strip_trailing_source_footers(response.choices[0].message.content or "")
+    raw = response.choices[0].message.content or ""
+    return _strip_trailing_source_footers(_strip_think_blocks(raw))
 
 
 def stream_answer(

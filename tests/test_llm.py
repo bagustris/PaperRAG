@@ -15,6 +15,7 @@ from paperrag.llm import (
     _is_hf_model,
     _is_llama_backend,
     _sanitize_stream,
+    _strip_think_blocks,
     _strip_trailing_source_footers,
     _llama_server_clients,
     _llama_server_procs,
@@ -141,6 +142,66 @@ def test_build_messages_custom_prompt():
     assert msgs[0]["content"] == custom
 
 
+# ---------------------------------------------------------------------------
+# _strip_think_blocks
+# ---------------------------------------------------------------------------
+
+
+def test_strip_think_blocks_complete_block():
+    text = "<think>\nLet me reason about this...\n</think>\nThe answer is 42."
+    assert _strip_think_blocks(text) == "The answer is 42."
+
+
+def test_strip_think_blocks_no_blocks():
+    text = "The answer is 42."
+    assert _strip_think_blocks(text) == "The answer is 42."
+
+
+def test_strip_think_blocks_only_think_block():
+    text = "<think>Only reasoning here, no answer.</think>"
+    assert _strip_think_blocks(text) == ""
+
+
+def test_strip_think_blocks_unclosed():
+    text = "<think>This reasoning was truncated by max_tokens and never closed"
+    assert _strip_think_blocks(text) == ""
+
+
+def test_strip_think_blocks_multiple_blocks():
+    text = (
+        "<think>First reasoning</think>\n"
+        "Part one.\n"
+        "<think>Second reasoning</think>\n"
+        "Part two."
+    )
+    result = _strip_think_blocks(text)
+    assert "Part one." in result
+    assert "Part two." in result
+    assert "<think>" not in result
+
+
+def test_strip_think_blocks_multiline_reasoning():
+    text = (
+        "<think>\n"
+        "Step 1: Consider the context.\n"
+        "Step 2: The paper discusses attention mechanisms.\n"
+        "Step 3: Formulate the answer.\n"
+        "</think>\n"
+        "Attention is a mechanism that allows models to focus on relevant parts of the input [1]."
+    )
+    result = _strip_think_blocks(text)
+    assert result == "Attention is a mechanism that allows models to focus on relevant parts of the input [1]."
+    assert "<think>" not in result
+
+
+def test_strip_think_blocks_empty_string():
+    assert _strip_think_blocks("") == ""
+
+
+def test_strip_think_blocks_whitespace_after_close():
+    text = "<think>reasoning</think>   \n\n  The answer."
+    assert _strip_think_blocks(text) == "The answer."
+
 
 # ---------------------------------------------------------------------------
 # _resolve_model_path
@@ -194,6 +255,35 @@ def test_strip_trailing_source_footers_keeps_inline_source_word():
 def test_sanitize_stream_removes_trailing_source_footer():
     chunks = ["Answer text [1].\n", "\nSource: [1]\n", "Source: [2]\n"]
     assert list(_sanitize_stream(iter(chunks))) == ["Answer text [1]."]
+
+
+def test_sanitize_stream_strips_think_blocks():
+    """_sanitize_stream should strip <think> blocks from streamed output."""
+    chunks = [
+        "<think>\nLet me reason",
+        " about this.\n</think>\n",
+        "The answer is attention [1].",
+    ]
+    result = list(_sanitize_stream(iter(chunks)))
+    assert result == ["The answer is attention [1]."]
+
+
+def test_sanitize_stream_strips_think_blocks_and_source_footers():
+    """_sanitize_stream should strip both <think> blocks and trailing source footers."""
+    chunks = [
+        "<think>reasoning</think>\n",
+        "Answer text [1].\n",
+        "\nSource: [1]\n",
+    ]
+    result = list(_sanitize_stream(iter(chunks)))
+    assert result == ["Answer text [1]."]
+
+
+def test_sanitize_stream_think_only_yields_nothing():
+    """If the entire response is a think block, _sanitize_stream should yield nothing."""
+    chunks = ["<think>Only internal reasoning, no answer.</think>"]
+    result = list(_sanitize_stream(iter(chunks)))
+    assert result == []
 
 
 def test_cleanup_llama_servers_swallows_keyboard_interrupt():
@@ -337,3 +427,105 @@ def test_describe_llm_error_ollama_generic():
     msg, hint = describe_llm_error(exc, "qwen2.5:1.5b")
     assert "LLM error" in msg
     assert hint is None
+
+
+# ---------------------------------------------------------------------------
+# generate_answer / stream_answer — thinking model responses (mocked)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_answer_strips_think_blocks_ollama():
+    """generate_answer should strip <think> blocks from Ollama thinking model responses."""
+    cfg = LLMConfig(model_name="qwen3:1.7b", think=True)
+
+    think_response = (
+        "<think>\n"
+        "The user asks about attention mechanisms.\n"
+        "Let me check the context provided.\n"
+        "</think>\n"
+        "Attention allows models to focus on relevant input parts [1]."
+    )
+
+    fake_response = MagicMock()
+    fake_response.choices[0].message.content = think_response
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = fake_response
+
+    with patch("paperrag.llm._prepare", return_value=(fake_client, [])):
+        result = generate_answer("What is attention?", ["context about attention"], cfg)
+
+    assert result != ""
+    assert "<think>" not in result
+    assert "Attention allows models to focus on relevant input parts [1]." == result
+
+
+def test_generate_answer_strips_think_blocks_llama_server(tmp_path):
+    """generate_answer should strip <think> blocks from llama-server thinking model responses."""
+    model_file = tmp_path / "qwen3-model.gguf"
+    model_file.write_bytes(b"fake gguf")
+
+    cfg = LLMConfig(model_name=str(model_file), think=True)
+
+    think_response = (
+        "<think>\n"
+        "Step 1: Read context about the paper.\n"
+        "Step 2: The paper is about speech processing.\n"
+        "</think>\n"
+        "The paper discusses speech chain mechanisms [1]."
+    )
+
+    fake_response = MagicMock()
+    fake_response.choices[0].message.content = think_response
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = fake_response
+
+    with patch("paperrag.llm._get_or_start_llama_server", return_value=fake_client):
+        result = generate_answer("What is the paper about?", ["context about speech"], cfg)
+
+    assert result != ""
+    assert "<think>" not in result
+    assert "The paper discusses speech chain mechanisms [1]." == result
+
+
+def test_stream_answer_strips_think_blocks_ollama():
+    """stream_answer should strip <think> blocks from Ollama thinking model responses."""
+    cfg = LLMConfig(model_name="qwen3:1.7b", think=True)
+
+    # Simulate streamed chunks that include think blocks
+    chunk1 = MagicMock()
+    chunk1.choices[0].delta.content = "<think>\nReasoning"
+    chunk2 = MagicMock()
+    chunk2.choices[0].delta.content = " here.\n</think>\n"
+    chunk3 = MagicMock()
+    chunk3.choices[0].delta.content = "The answer is 42."
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = iter([chunk1, chunk2, chunk3])
+
+    with patch("paperrag.llm._prepare", return_value=(fake_client, [])):
+        chunks = list(stream_answer("What is the answer?", ["some context"], cfg))
+
+    assert len(chunks) == 1
+    assert chunks[0] == "The answer is 42."
+    assert "<think>" not in chunks[0]
+
+
+def test_generate_answer_thinking_only_response():
+    """generate_answer returns empty string when model only outputs thinking, no answer."""
+    cfg = LLMConfig(model_name="qwen3:1.7b", think=True)
+
+    # Model produces only a think block with no visible answer
+    think_only = "<think>\nI thought about this but produced no answer.\n</think>"
+
+    fake_response = MagicMock()
+    fake_response.choices[0].message.content = think_only
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = fake_response
+
+    with patch("paperrag.llm._prepare", return_value=(fake_client, [])):
+        result = generate_answer("Q?", ["ctx"], cfg)
+
+    assert result == ""
