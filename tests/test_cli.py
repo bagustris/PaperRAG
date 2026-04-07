@@ -388,7 +388,7 @@ def test_entrypoint_warns_on_input_dir_without_subcommand(tmp_path):
         result = runner.invoke(app, ["--input-dir", str(tmp_path)])
 
     assert result.exit_code == 0
-    assert "--input-dir / -d is for indexing only" in result.output
+    assert "--input-dir / -d does not auto-index PDFs" in result.output
 
 
 def test_entrypoint_no_warning_without_input_dir(tmp_path):
@@ -406,7 +406,8 @@ def test_entrypoint_no_warning_without_input_dir(tmp_path):
     ):
         result = runner.invoke(app, [])
 
-    assert "--input-dir / -d is for indexing only" not in result.output
+    assert result.exit_code == 0
+    assert "--input-dir / -d does not auto-index PDFs" not in result.output
 
 
 def test_entrypoint_help_contains_examples():
