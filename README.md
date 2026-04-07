@@ -11,11 +11,10 @@ Deepwiki:  https://deepwiki.com/bagustris/PaperRAG
 
 - Structured PDF parsing with adaptive OCR (auto-detects per file)
 - Section-aware chunking and FAISS vector store
-- Local LLM via Ollama — fully offline
+- Local LLM via Ollama and Llama.cpp — fully offline
 - Interactive REPL with prompt presets, session export, and config inspection
 - Single-PDF review mode with autofocus on the active paper
 - Deterministic, reproducible indexing with auto-discovered `.paperrag-index`
-- Default input directory at `~/Documents/Mendeley Desktop/` for local collections
 
 ------------------------------------------------------------------------
 
@@ -222,7 +221,7 @@ MIT
 
 ## Note
 - This project was born as an answer to [my own question](https://academia.stackexchange.com/questions/203900/local-rag-like-chatgpt-for-abundant-of-pdfs/225980#225980). 
-- On my laptop (Dell XPS 9320, i7-1260P 16GB RAM), it takes about **20 hours** to index ~2000 PDFs with default configuration.
+- On my laptop (Dell XPS 9320, i7-1260P 16GB RAM), it takes about **20 hours** to index ~2000 PDFs with the default configuration.
 
 ## Citation  
 TBA 
