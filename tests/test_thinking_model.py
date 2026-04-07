@@ -129,7 +129,7 @@ def test_thinking_model_stream_non_empty_mocked():
 # Live Ollama integration tests (skipped when Ollama or model unavailable)
 # ---------------------------------------------------------------------------
 
-THINKING_MODEL = "qwen3:1.7b"
+THINKING_MODEL = "qwen3:0.6b"
 
 
 @pytest.mark.skipif(

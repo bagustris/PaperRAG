@@ -11,12 +11,14 @@ from paperrag.llm import (
     _build_messages,
     _build_prompt,
     _cleanup_llama_servers,
+    _extract_answer,
     _is_gguf_model,
     _is_hf_model,
     _is_llama_backend,
     _sanitize_stream,
     _strip_think_blocks,
     _strip_trailing_source_footers,
+    _thinking_max_tokens,
     _llama_server_clients,
     _llama_server_procs,
     _resolve_model_path,
@@ -204,6 +206,79 @@ def test_strip_think_blocks_whitespace_after_close():
 
 
 # ---------------------------------------------------------------------------
+# _thinking_max_tokens
+# ---------------------------------------------------------------------------
+
+
+def test_thinking_max_tokens_think_off():
+    cfg = LLMConfig(max_tokens=256, think=False)
+    assert _thinking_max_tokens(cfg) == 256
+
+
+def test_thinking_max_tokens_think_on():
+    cfg = LLMConfig(max_tokens=256, think=True)
+    assert _thinking_max_tokens(cfg) == 256 * 4
+
+
+def test_thinking_max_tokens_think_on_custom():
+    cfg = LLMConfig(max_tokens=512, think=True)
+    assert _thinking_max_tokens(cfg) == 512 * 4
+
+
+# ---------------------------------------------------------------------------
+# _extract_answer
+# ---------------------------------------------------------------------------
+
+
+def test_extract_answer_content_present():
+    """_extract_answer returns content when it contains the answer."""
+    msg = MagicMock()
+    msg.content = "The answer is 42."
+    assert _extract_answer(msg) == "The answer is 42."
+
+
+def test_extract_answer_content_with_think_blocks():
+    """_extract_answer strips <think> blocks from content."""
+    msg = MagicMock()
+    msg.content = "<think>reasoning</think>\nThe answer is 42."
+    assert _extract_answer(msg) == "The answer is 42."
+
+
+def test_extract_answer_content_empty_reasoning_content_present():
+    """_extract_answer falls back to reasoning_content when content is empty."""
+    msg = MagicMock()
+    msg.content = ""
+    msg.model_dump.return_value = {
+        "content": "",
+        "reasoning_content": "The model reasoned and concluded: the answer is 42.",
+        "role": "assistant",
+    }
+    result = _extract_answer(msg)
+    assert "the answer is 42" in result.lower()
+
+
+def test_extract_answer_content_none_reasoning_present():
+    """_extract_answer falls back to reasoning field (Ollama) when content is None."""
+    msg = MagicMock()
+    msg.content = None
+    msg.model_dump.return_value = {
+        "content": None,
+        "reasoning": "After analysis, the paper discusses attention mechanisms.",
+        "role": "assistant",
+    }
+    result = _extract_answer(msg)
+    assert "attention" in result.lower()
+
+
+def test_extract_answer_both_empty():
+    """_extract_answer returns empty string when both content and reasoning are empty."""
+    msg = MagicMock()
+    msg.content = ""
+    msg.model_dump.return_value = {"content": "", "role": "assistant"}
+    assert _extract_answer(msg) == ""
+
+
+# ---------------------------------------------------------------------------
 # _resolve_model_path
 # ---------------------------------------------------------------------------
 
@@ -254,7 +329,7 @@ def test_strip_trailing_source_footers_keeps_inline_source_word():
 
 def test_sanitize_stream_removes_trailing_source_footer():
     chunks = ["Answer text [1].\n", "\nSource: [1]\n", "Source: [2]\n"]
-    assert list(_sanitize_stream(iter(chunks))) == ["Answer text [1]."]
+    assert list(_sanitize_stream(chunks)) == ["Answer text [1]."]
 
 
 def test_sanitize_stream_strips_think_blocks():
@@ -264,7 +339,7 @@ def test_sanitize_stream_strips_think_blocks():
         " about this.\n</think>\n",
         "The answer is attention [1].",
     ]
-    result = list(_sanitize_stream(iter(chunks)))
+    result = list(_sanitize_stream(chunks))
     assert result == ["The answer is attention [1]."]
 
 
@@ -275,14 +350,14 @@ def test_sanitize_stream_strips_think_blocks_and_source_footers():
         "Answer text [1].\n",
         "\nSource: [1]\n",
     ]
-    result = list(_sanitize_stream(iter(chunks)))
+    result = list(_sanitize_stream(chunks))
     assert result == ["Answer text [1]."]
 
 
 def test_sanitize_stream_think_only_yields_nothing():
     """If the entire response is a think block, _sanitize_stream should yield nothing."""
     chunks = ["<think>Only internal reasoning, no answer.</think>"]
-    result = list(_sanitize_stream(iter(chunks)))
+    result = list(_sanitize_stream(chunks))
     assert result == []
 
 
@@ -347,6 +422,17 @@ def test_generate_answer_hf_model_mocked():
     mock_res.assert_called_once_with("Qwen/Qwen3-1.7B-GGUF")
 
 
+def _make_stream_chunk(content: str | None = None, reasoning: str | None = None) -> MagicMock:
+    """Create a fake streaming chunk with proper model_dump() support."""
+    chunk = MagicMock()
+    chunk.choices[0].delta.content = content
+    dump = {"content": content, "role": "assistant"}
+    if reasoning is not None:
+        dump["reasoning"] = reasoning
+    chunk.choices[0].delta.model_dump.return_value = dump
+    return chunk
+
+
 def test_stream_answer_llama_server_mocked(tmp_path):
     """stream_answer yields tokens from llama-server via OpenAI streaming."""
     model_file = tmp_path / "model.gguf"
@@ -354,10 +440,8 @@ def test_stream_answer_llama_server_mocked(tmp_path):
 
     cfg = LLMConfig(model_name=str(model_file))
 
-    chunk1 = MagicMock()
-    chunk1.choices[0].delta.content = "Hello"
-    chunk2 = MagicMock()
-    chunk2.choices[0].delta.content = " world"
+    chunk1 = _make_stream_chunk(content="Hello")
+    chunk2 = _make_stream_chunk(content=" world")
 
     fake_client = MagicMock()
     fake_client.chat.completions.create.return_value = iter([chunk1, chunk2])
@@ -493,13 +577,10 @@ def test_stream_answer_strips_think_blocks_ollama():
     """stream_answer should strip <think> blocks from Ollama thinking model responses."""
     cfg = LLMConfig(model_name="qwen3:1.7b", think=True)
 
-    # Simulate streamed chunks that include think blocks
-    chunk1 = MagicMock()
-    chunk1.choices[0].delta.content = "<think>\nReasoning"
-    chunk2 = MagicMock()
-    chunk2.choices[0].delta.content = " here.\n</think>\n"
-    chunk3 = MagicMock()
-    chunk3.choices[0].delta.content = "The answer is 42."
+    # Simulate streamed chunks that include think blocks in content
+    chunk1 = _make_stream_chunk(content="<think>\nReasoning")
+    chunk2 = _make_stream_chunk(content=" here.\n</think>\n")
+    chunk3 = _make_stream_chunk(content="The answer is 42.")
 
     fake_client = MagicMock()
     fake_client.chat.completions.create.return_value = iter([chunk1, chunk2, chunk3])
@@ -519,8 +600,15 @@ def test_generate_answer_thinking_only_response():
     # Model produces only a think block with no visible answer
     think_only = "<think>\nI thought about this but produced no answer.\n</think>"
 
+    fake_msg = MagicMock()
+    fake_msg.content = think_only
+    fake_msg.model_dump.return_value = {
+        "content": think_only,
+        "role": "assistant",
+    }
+
     fake_response = MagicMock()
-    fake_response.choices[0].message.content = think_only
+    fake_response.choices[0].message = fake_msg
 
     fake_client = MagicMock()
     fake_client.chat.completions.create.return_value = fake_response

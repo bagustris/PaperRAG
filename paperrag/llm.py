@@ -79,6 +79,13 @@ _TRAILING_SOURCE_LINE_RE = re.compile(r"^\s*Sources?:\s*\[[0-9,\s-]+\]\s*$", re.
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _UNCLOSED_THINK_RE = re.compile(r"<think>.*", re.DOTALL)
 
+# Multiplier applied to max_tokens when thinking/reasoning mode is active.
+# Thinking models spend a large portion of their token budget on internal
+# chain-of-thought reasoning before producing the visible answer.  Without
+# a budget boost the reasoning can exhaust all available tokens, leaving the
+# answer empty (the root cause of issue #7).
+_THINKING_TOKEN_MULTIPLIER = 4
+
 
 def _build_prompt(question: str, context_chunks: list[str], source_labels: list[int] | None = None) -> str:
     context_lines = []
@@ -119,6 +126,58 @@ def _strip_think_blocks(text: str) -> str:
     return result.strip()
 
 
+def _thinking_max_tokens(config: LLMConfig) -> int:
+    """Return the effective *max_tokens* for the current request.
+
+    When thinking/reasoning mode is active the model spends a significant
+    portion of the token budget on an internal chain-of-thought *before*
+    producing the visible answer.  Both Ollama and llama-server count
+    thinking tokens against the ``max_tokens`` limit, so we multiply the
+    user-configured value by :data:`_THINKING_TOKEN_MULTIPLIER` to leave
+    enough room for the actual answer.
+    """
+    if config.think:
+        return config.max_tokens * _THINKING_TOKEN_MULTIPLIER
+    return config.max_tokens
+
+
+def _extract_answer(message: object) -> str:
+    """Extract the visible answer text from a chat completion message.
+
+    Backends may return thinking/reasoning content in different fields:
+
+    * **Ollama** → ``message.reasoning`` (extra field)
+    * **llama-server** → ``message.reasoning_content``
+
+    The visible answer is always in ``message.content``.  If ``content`` is
+    empty (thinking exhausted the token budget) we fall back to stripping
+    ``<think>`` blocks from the raw reasoning – this can recover an answer
+    when the model interleaved reasoning and answer text.
+    """
+    content: str = getattr(message, "content", None) or ""
+    content = _strip_think_blocks(content)
+    if content:
+        return content
+
+    # Fallback: try to extract something useful from reasoning fields.
+    # Both Ollama (``reasoning``) and llama-server (``reasoning_content``)
+    # store the raw thinking text in an extra field on the message object.
+    # It is only accessible via model_dump() because the OpenAI SDK does
+    # not define these as typed attributes.
+    try:
+        dump = message.model_dump()  # type: ignore[union-attr]
+    except Exception:
+        return ""
+    reasoning = dump.get("reasoning_content") or dump.get("reasoning") or ""
+    if reasoning:
+        # The reasoning text may contain <think> wrapped answer fragments
+        stripped = _strip_think_blocks(reasoning)
+        if stripped:
+            logger.debug("Recovered answer from reasoning field (content was empty)")
+            return stripped
+    return ""
+
+
 def _strip_trailing_source_footers(text: str) -> str:
     """Remove standalone trailing ``Source: [n]`` footer lines from model output."""
     lines = text.splitlines()
@@ -135,13 +194,58 @@ def _strip_trailing_source_footers(text: str) -> str:
     return "\n".join(lines[:end]).strip()
 
 
-def _sanitize_stream(chunks: Iterator[str]) -> Iterator[str]:
-    """Buffer streamed text, strip think blocks and trailing source footers."""
-    text = "".join(chunks)
+def _collect_stream_chunks(response: Iterator[object]) -> tuple[list[str], list[str]]:
+    """Iterate over a streaming chat-completion response and collect text.
+
+    Returns ``(content_parts, reasoning_parts)`` where each list contains the
+    non-empty string fragments from ``delta.content`` and from the
+    ``reasoning``/``reasoning_content`` extra fields respectively.
+    """
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    for chunk in response:
+        delta = chunk.choices[0].delta  # type: ignore[union-attr]
+        c = getattr(delta, "content", None)
+        if c:
+            content_parts.append(c)
+        # Ollama uses "reasoning", llama-server uses "reasoning_content".
+        # Neither is a typed SDK attribute so we dump to dict.
+        try:
+            d = delta.model_dump()
+        except Exception:
+            continue
+        r = d.get("reasoning_content") or d.get("reasoning") or ""
+        if r:
+            reasoning_parts.append(r)
+    return content_parts, reasoning_parts
+
+
+def _sanitize_stream(
+    content_parts: list[str],
+    reasoning_parts: list[str] | None = None,
+) -> Iterator[str]:
+    """Clean collected stream text, strip think blocks and trailing source footers.
+
+    When *reasoning_parts* is provided and the primary *content_parts* yield
+    nothing useful, the reasoning text is used as a fallback so that the answer
+    is not silently lost.
+    """
+    text = "".join(content_parts)
     cleaned = _strip_think_blocks(text)
     cleaned = _strip_trailing_source_footers(cleaned)
     if cleaned:
         yield cleaned
+        return
+
+    # Fallback: if content stream was empty, try reasoning stream
+    if reasoning_parts:
+        reasoning_text = "".join(reasoning_parts)
+        if reasoning_text:
+            fallback = _strip_think_blocks(reasoning_text)
+            fallback = _strip_trailing_source_footers(fallback)
+            if fallback:
+                logger.debug("Recovered streamed answer from reasoning field (content was empty)")
+                yield fallback
 
 
 _OLLAMA_BASE_URL = "http://localhost:11434"
@@ -579,10 +683,10 @@ def generate_answer(
             model=os.path.basename(model_path),
             messages=messages,
             temperature=config.temperature,
-            max_tokens=config.max_tokens,
+            max_tokens=_thinking_max_tokens(config),
         )
-        raw = response.choices[0].message.content or ""
-        return _strip_trailing_source_footers(_strip_think_blocks(raw))
+        raw = _extract_answer(response.choices[0].message)
+        return _strip_trailing_source_footers(raw)
 
     try:
         client, messages = _prepare(question, context_chunks, config)
@@ -595,11 +699,11 @@ def generate_answer(
         model=config.model_name,
         messages=messages,
         temperature=config.temperature,
-        max_tokens=config.max_tokens,
+        max_tokens=_thinking_max_tokens(config),
         extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
     )
-    raw = response.choices[0].message.content or ""
-    return _strip_trailing_source_footers(_strip_think_blocks(raw))
+    raw = _extract_answer(response.choices[0].message)
+    return _strip_trailing_source_footers(raw)
 
 
 def stream_answer(
@@ -651,14 +755,11 @@ def stream_answer(
             model=os.path.basename(model_path),
             messages=messages,
             temperature=config.temperature,
-            max_tokens=config.max_tokens,
+            max_tokens=_thinking_max_tokens(config),
             stream=True,
         )
-        yield from _sanitize_stream(
-            delta
-            for chunk in response
-            if (delta := chunk.choices[0].delta.content)
-        )
+        content_parts, reasoning_parts = _collect_stream_chunks(response)
+        yield from _sanitize_stream(content_parts, reasoning_parts)
         return
 
     try:
@@ -672,15 +773,12 @@ def stream_answer(
         model=config.model_name,
         messages=messages,
         temperature=config.temperature,
-        max_tokens=config.max_tokens,
+        max_tokens=_thinking_max_tokens(config),
         stream=True,
         extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
     )
-    yield from _sanitize_stream(
-        delta
-        for chunk in response
-        if (delta := chunk.choices[0].delta.content)
-    )
+    content_parts, reasoning_parts = _collect_stream_chunks(response)
+    yield from _sanitize_stream(content_parts, reasoning_parts)
 
 
 def describe_llm_error(exc: Exception, model_name: str) -> tuple[str, str | None]:
