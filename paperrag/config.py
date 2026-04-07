@@ -25,6 +25,7 @@ _RC_KEY_MAP: dict[str, tuple[str, type]] = {
     "system-prompt": ("llm.system_prompt", str),
     "n-gpu-layers": ("llm.n_gpu_layers", int),
     "n-threads": ("llm.n_threads", int),
+    "think": ("llm.think", bool),
 }
 
 
@@ -270,6 +271,13 @@ class LLMConfig(BaseModel):
         description=(
             "Number of CPU threads for the llama.cpp backend (0 = auto-detect via os.cpu_count()). "
             "Has no effect on the Ollama backend."
+        ),
+    )
+    think: bool = Field(
+        default=False,
+        description=(
+            "Enable thinking/reasoning mode for models that support it (e.g. Qwen3, Qwen3.5). "
+            "When False (default), thinking is suppressed via /no_think for supported models."
         ),
     )
 

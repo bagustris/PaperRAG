@@ -459,16 +459,17 @@ def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int
 # ---------------------------------------------------------------------------
 
 
-def _build_messages(question: str, context_chunks: list[str], model_name: str, system_prompt: str, source_labels: list[int] | None = None) -> list[dict]:
+def _build_messages(question: str, context_chunks: list[str], model_name: str, system_prompt: str, source_labels: list[int] | None = None, think: bool = False) -> list[dict]:
     """Build the chat messages list from question, context chunks, and model name."""
     user_prompt = _build_prompt(question, context_chunks, source_labels=source_labels)
 
-    # For Qwen3 models, append /no_think to disable the slow "thinking" mode.
+    # For Qwen3/Qwen3.5 models, suppress thinking mode unless explicitly enabled.
     # Thinking mode generates a long internal reasoning chain before answering,
     # which is unnecessary for RAG Q&A and adds ~30-50s of latency.
     model_lower = model_name.lower()
     if "qwen3" in model_lower or "qwen-3" in model_lower:
-        user_prompt += " /no_think"
+        if not think:
+            user_prompt += " /no_think"
 
     return [
         {"role": "system", "content": system_prompt},
@@ -486,7 +487,7 @@ def _prepare(
     global _client_cache
     from openai import OpenAI
 
-    messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels)
+    messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels, think=config.think)
 
     if _client_cache is not None:
         client = _client_cache
@@ -546,7 +547,7 @@ def generate_answer(
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
         client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
-        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt)
+        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, think=config.think)
         logger.info(
             "Calling llama-server (model=%s, temp=%.2f)", config.model_name, config.temperature
         )
@@ -614,7 +615,7 @@ def stream_answer(
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
         client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
-        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels)
+        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels, think=config.think)
         logger.info(
             "Calling llama-server streaming (model=%s, temp=%.2f)",
             config.model_name,

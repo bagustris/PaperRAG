@@ -142,6 +142,9 @@ def entrypoint(
     system_prompt: str = typer.Option(
         None, "--system-prompt", "--prompt", help="LLM system prompt"
     ),
+    think: bool = typer.Option(
+        False, "--think/--no-think", help="Enable thinking/reasoning mode for supported models (e.g. Qwen3)"
+    ),
 ) -> None:
     """PaperRAG - local RAG for academic PDFs."""
     if ctx.invoked_subcommand is None:
@@ -235,6 +238,9 @@ def entrypoint(
 
         if system_prompt:
             cfg.llm.system_prompt = system_prompt
+
+        if think:
+            cfg.llm.think = think
 
         _print_gpu_info()
         start_repl(cfg)
@@ -661,6 +667,9 @@ def review(
         "-o",
         help="Save Q&A session to this markdown file on exit",
     ),
+    think: bool = typer.Option(
+        False, "--think/--no-think", help="Enable thinking/reasoning mode for supported models (e.g. Qwen3)"
+    ),
 ) -> None:
     """Index a PDF file (or directory) and start an interactive review session.
 
@@ -718,6 +727,8 @@ def review(
         cfg.llm.system_prompt = system_prompt
     if n_gpu_layers is not None:
         cfg.llm.n_gpu_layers = n_gpu_layers
+    if think:
+        cfg.llm.think = think
 
     # Apply named preset (--system-prompt takes priority over --preset)
     if preset is not None:
@@ -781,6 +792,9 @@ def query(
     model: str = typer.Option(
         None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"
     ),
+    think: bool = typer.Option(
+        False, "--think/--no-think", help="Enable thinking/reasoning mode for supported models (e.g. Qwen3)"
+    ),
 ) -> None:
     """Query the indexed papers."""
     from paperrag.retriever import Retriever
@@ -837,6 +851,9 @@ def query(
 
     if system_prompt:
         cfg.llm.system_prompt = system_prompt
+
+    if think:
+        cfg.llm.think = think
 
     try:
         retriever = Retriever(cfg)

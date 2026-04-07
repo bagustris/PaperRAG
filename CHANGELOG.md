@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [XX.YY.ZZ: Major.Minor.Patch] - YYYY-MM-DD  
 
 ## [0.6.1] - 2026-04-07
-- Fixed a bug creating copy of index directory with
+- Fixed a bug creating copy of index directory
+- Expanded history to previous sessions in REPL 
 
 ## [0.6.0] - 2026-04-06
 - Added review-session export with `/export` and `--output`.

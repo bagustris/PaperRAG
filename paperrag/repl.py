@@ -12,7 +12,7 @@ from pathlib import Path
 from prompt_toolkit import HTML, PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
-from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.table import Table
 
@@ -35,6 +35,7 @@ SLASH_COMMANDS: list[str] = [
     "/prompt",
     "/preset",
     "/export",
+    "/think",
     "/model",
     "/config",
     "/rc",
@@ -60,6 +61,7 @@ HELP_TEXT = """\
   [cyan]/preset <name>[/cyan]         Switch to a named prompt preset: default, reviewer, summarizer, explainer
   [cyan]/export[/cyan]                 Export this session's Q&A to a markdown file (auto-named)
   [cyan]/export <path>[/cyan]          Export to a specific file path
+  [cyan]/think[/cyan]                  Toggle thinking/reasoning mode (for models like Qwen3, default: off)
   [cyan]/model <name>[/cyan]           Set LLM model name
   [cyan]/config[/cyan]                 Show current configuration
   [cyan]/rc[/cyan]                     Show loaded .paperragrc files and values
@@ -203,7 +205,7 @@ def start_repl(
 
     # Create prompt session with history and slash-command completion
     session = PromptSession(
-        history=InMemoryHistory(),
+        history=FileHistory(str(Path.home() / ".paperrag_history")),
         completer=_SlashCompleter(),
         complete_while_typing=False,  # only complete on Tab
     )
@@ -422,10 +424,27 @@ def start_repl(
             console.print(f"[green]Session exported to {export_path}[/green]")
             continue
 
+        if cmd_parts[0] == "/think":
+            cfg.llm.think = not cfg.llm.think
+            state = "[green]on[/green]" if cfg.llm.think else "[dim]off[/dim]"
+            console.print(f"Thinking mode: {state}")
+            continue
+
         if cmd_parts[0] == "/model":
             if len(cmd_parts) == 2:
-                cfg.llm.model_name = cmd_parts[1]
-                console.print(f"LLM model set to {cmd_parts[1]}")
+                from paperrag.llm import _is_gguf_model
+                raw = cmd_parts[1]
+                # Expand ~ for local file paths
+                expanded = str(Path(raw).expanduser()) if raw.startswith("~") else raw
+                if _is_gguf_model(expanded):
+                    if Path(expanded).is_file():
+                        cfg.llm.model_name = expanded
+                        console.print(f"LLM model found at [cyan]{expanded}[/cyan]")
+                    else:
+                        console.print(f"[red]LLM model cannot be found: {expanded}[/red]")
+                else:
+                    cfg.llm.model_name = expanded
+                    console.print(f"LLM model set to [cyan]{expanded}[/cyan]")
             else:
                 console.print("[yellow]Usage: /model <model-name>[/yellow]")
             continue
@@ -440,6 +459,8 @@ def start_repl(
             console.print(f"  GPU layers (llama.cpp): [cyan]{cfg.llm.n_gpu_layers}[/cyan]")
             n_threads_label = str(cfg.llm.n_threads) if cfg.llm.n_threads > 0 else f"auto ({os.cpu_count()})"
             console.print(f"  CPU threads (llama.cpp): [cyan]{n_threads_label}[/cyan]")
+            think_label = "[green]on[/green]" if cfg.llm.think else "[dim]off[/dim]"
+            console.print(f"  Thinking mode: {think_label}")
             active_preset = next(
                 (k for k, v in PROMPT_PRESETS.items() if v == cfg.llm.system_prompt), None
             )
