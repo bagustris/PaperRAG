@@ -26,9 +26,19 @@ except RuntimeError:
 from paperrag.config import PaperRAGConfig, load_rc, apply_rc, PROMPT_PRESETS, PRESET_MAX_TOKENS
 from paperrag import __version__
 
+EXAMPLES_EPILOG = (
+    "Examples:\n\n"
+    "  paperrag                              # auto-discover index from CWD\n\n"
+    "  paperrag --index-dir /path/to/index   # REPL with a specific index\n\n"
+    "  paperrag index --input-dir ./papers   # index PDFs first\n\n"
+    "  paperrag query \"What is attention?\"   # one-shot query\n\n"
+    "  paperrag review paper.pdf             # index + review a single PDF\n"
+)
+
 app = typer.Typer(
     name="paperrag",
     help="PaperRAG - local RAG for academic PDFs.",
+    epilog=EXAMPLES_EPILOG,
     invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
@@ -146,9 +156,20 @@ def entrypoint(
         False, "--think/--no-think", help="Enable thinking/reasoning mode for supported models (e.g. Qwen3)"
     ),
 ) -> None:
-    """PaperRAG - local RAG for academic PDFs."""
+    """PaperRAG - local RAG for academic PDFs.
+
+    Starts an interactive REPL session using an existing index.
+    """
     if ctx.invoked_subcommand is None:
         from paperrag.repl import start_repl
+
+        if input_dir:
+            console.print(
+                "[yellow]⚠ Warning: --input-dir / -d is for indexing only and has no "
+                "effect here.\n"
+                "  To index PDFs run: paperrag index --input-dir <path>\n"
+                "  To start the REPL use: paperrag --index-dir <path>[/yellow]"
+            )
 
         cfg = PaperRAGConfig()
 

@@ -366,3 +366,56 @@ def test_review_resets_index_dir_from_rc(tmp_path):
     assert cfg.index_dir != "/some/rc/path"
     assert ".paperrag-index" in cfg.index_dir
 
+
+# --- entrypoint warning/help tests -----------------------------------------
+
+
+def test_entrypoint_warns_on_input_dir_without_subcommand(tmp_path):
+    """paperrag -d <path> should emit a warning that -d is for indexing only."""
+    # Build a minimal valid index so the REPL entry-point can discover it,
+    # but patch start_repl so we never actually enter the interactive loop.
+    index_path = tmp_path / ".paperrag-index"
+    index_path.mkdir()
+    store = VectorStore(index_path, 384)
+    store.version = 1
+    store.save()
+
+    runner = CliRunner()
+    with (
+        patch("paperrag.repl.start_repl"),
+        patch("paperrag.cli.Path.cwd", return_value=tmp_path),
+    ):
+        result = runner.invoke(app, ["--input-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "--input-dir / -d is for indexing only" in result.output
+
+
+def test_entrypoint_no_warning_without_input_dir(tmp_path):
+    """paperrag without -d should NOT print the -d warning."""
+    index_path = tmp_path / ".paperrag-index"
+    index_path.mkdir()
+    store = VectorStore(index_path, 384)
+    store.version = 1
+    store.save()
+
+    runner = CliRunner()
+    with (
+        patch("paperrag.repl.start_repl"),
+        patch("paperrag.cli.Path.cwd", return_value=tmp_path),
+    ):
+        result = runner.invoke(app, [])
+
+    assert "--input-dir / -d is for indexing only" not in result.output
+
+
+def test_entrypoint_help_contains_examples():
+    """paperrag --help should show usage examples."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    # The epilog examples must appear in the help output.
+    assert "paperrag index" in result.output
+    assert "paperrag query" in result.output
+
