@@ -79,12 +79,14 @@ _TRAILING_SOURCE_LINE_RE = re.compile(r"^\s*Sources?:\s*\[[0-9,\s-]+\]\s*$", re.
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _UNCLOSED_THINK_RE = re.compile(r"<think>.*", re.DOTALL)
 
-# Multiplier applied to max_tokens when thinking/reasoning mode is active.
-# Thinking models spend a large portion of their token budget on internal
-# chain-of-thought reasoning before producing the visible answer.  Without
-# a budget boost the reasoning can exhaust all available tokens, leaving the
-# answer empty (the root cause of issue #7).
-_THINKING_TOKEN_MULTIPLIER = 4
+# Minimum context-window size used when thinking/reasoning mode is active.
+# Thinking models spend a large portion of their output budget on internal
+# chain-of-thought before producing the visible answer.  Both Ollama and
+# llama-server count thinking tokens against the max_tokens / context-window
+# limit, so the default ctx_size (2048) is far too small.  By ensuring a
+# floor of 16 384 tokens we give models enough room to reason AND produce
+# a non-empty answer (the root cause of issue #7).
+_THINKING_MIN_CTX_SIZE = 16384
 
 
 def _build_prompt(question: str, context_chunks: list[str], source_labels: list[int] | None = None) -> str:
@@ -126,19 +128,33 @@ def _strip_think_blocks(text: str) -> str:
     return result.strip()
 
 
-def _thinking_max_tokens(config: LLMConfig) -> int:
+def _thinking_max_tokens(config: LLMConfig) -> int | None:
     """Return the effective *max_tokens* for the current request.
 
-    When thinking/reasoning mode is active the model spends a significant
-    portion of the token budget on an internal chain-of-thought *before*
-    producing the visible answer.  Both Ollama and llama-server count
-    thinking tokens against the ``max_tokens`` limit, so we multiply the
-    user-configured value by :data:`_THINKING_TOKEN_MULTIPLIER` to leave
-    enough room for the actual answer.
+    When thinking/reasoning mode is active, both Ollama and llama-server
+    count thinking tokens against the ``max_tokens`` limit.  A fixed
+    multiplier is insufficient because reasoning length varies wildly
+    across models (from a few hundred to tens of thousands of tokens).
+    Instead we **omit** the limit entirely (return ``None``) so the model
+    can use its full context window.  The context window itself is enlarged
+    by :func:`_thinking_ctx_size`.
     """
     if config.think:
-        return config.max_tokens * _THINKING_TOKEN_MULTIPLIER
+        return None
     return config.max_tokens
+
+
+def _thinking_ctx_size(config: LLMConfig) -> int:
+    """Return the effective context-window size for the current request.
+
+    When thinking is enabled the context window must be large enough to
+    hold the prompt, the full reasoning trace, *and* the final answer.
+    We use ``max(config.ctx_size, _THINKING_MIN_CTX_SIZE)`` so the user's
+    explicit setting is respected when it is already large.
+    """
+    if config.think:
+        return max(config.ctx_size, _THINKING_MIN_CTX_SIZE)
+    return config.ctx_size
 
 
 def _extract_answer(message: object) -> str:
@@ -348,7 +364,7 @@ def prewarm_ollama(config: LLMConfig) -> bool:
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=1,
             stream=False,
-            extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
+            extra_body={"num_ctx": _thinking_ctx_size(config), "keep_alive": "30m"},
         )
         _model_checked.add(config.model_name)  # skip redundant check on first real query
         return True
@@ -674,17 +690,21 @@ def generate_answer(
 
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
-        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
+        ctx = _thinking_ctx_size(config)
+        client = _get_or_start_llama_server(model_path, ctx, config.n_gpu_layers, config.n_threads)
         messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, think=config.think)
         logger.info(
             "Calling llama-server (model=%s, temp=%.2f)", config.model_name, config.temperature
         )
-        response = client.chat.completions.create(  # type: ignore[union-attr]
-            model=os.path.basename(model_path),
-            messages=messages,
-            temperature=config.temperature,
-            max_tokens=_thinking_max_tokens(config),
-        )
+        create_kw: dict = {
+            "model": os.path.basename(model_path),
+            "messages": messages,
+            "temperature": config.temperature,
+        }
+        max_tok = _thinking_max_tokens(config)
+        if max_tok is not None:
+            create_kw["max_tokens"] = max_tok
+        response = client.chat.completions.create(**create_kw)  # type: ignore[union-attr]
         raw = _extract_answer(response.choices[0].message)
         return _strip_trailing_source_footers(raw)
 
@@ -695,13 +715,16 @@ def generate_answer(
             "The 'openai' package is required. Install with: uv pip install openai"
         )
 
-    response = client.chat.completions.create(
-        model=config.model_name,
-        messages=messages,
-        temperature=config.temperature,
-        max_tokens=_thinking_max_tokens(config),
-        extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
-    )
+    create_kw: dict = {
+        "model": config.model_name,
+        "messages": messages,
+        "temperature": config.temperature,
+        "extra_body": {"num_ctx": _thinking_ctx_size(config), "keep_alive": "30m"},
+    }
+    max_tok = _thinking_max_tokens(config)
+    if max_tok is not None:
+        create_kw["max_tokens"] = max_tok
+    response = client.chat.completions.create(**create_kw)
     raw = _extract_answer(response.choices[0].message)
     return _strip_trailing_source_footers(raw)
 
@@ -744,20 +767,24 @@ def stream_answer(
 
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
-        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
+        ctx = _thinking_ctx_size(config)
+        client = _get_or_start_llama_server(model_path, ctx, config.n_gpu_layers, config.n_threads)
         messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels, think=config.think)
         logger.info(
             "Calling llama-server streaming (model=%s, temp=%.2f)",
             config.model_name,
             config.temperature,
         )
-        response = client.chat.completions.create(  # type: ignore[union-attr]
-            model=os.path.basename(model_path),
-            messages=messages,
-            temperature=config.temperature,
-            max_tokens=_thinking_max_tokens(config),
-            stream=True,
-        )
+        create_kw: dict = {
+            "model": os.path.basename(model_path),
+            "messages": messages,
+            "temperature": config.temperature,
+            "stream": True,
+        }
+        max_tok = _thinking_max_tokens(config)
+        if max_tok is not None:
+            create_kw["max_tokens"] = max_tok
+        response = client.chat.completions.create(**create_kw)  # type: ignore[union-attr]
         content_parts, reasoning_parts = _collect_stream_chunks(response)
         yield from _sanitize_stream(content_parts, reasoning_parts)
         return
@@ -769,14 +796,17 @@ def stream_answer(
             "The 'openai' package is required. Install with: uv pip install openai"
         )
 
-    response = client.chat.completions.create(
-        model=config.model_name,
-        messages=messages,
-        temperature=config.temperature,
-        max_tokens=_thinking_max_tokens(config),
-        stream=True,
-        extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
-    )
+    create_kw: dict = {
+        "model": config.model_name,
+        "messages": messages,
+        "temperature": config.temperature,
+        "stream": True,
+        "extra_body": {"num_ctx": _thinking_ctx_size(config), "keep_alive": "30m"},
+    }
+    max_tok = _thinking_max_tokens(config)
+    if max_tok is not None:
+        create_kw["max_tokens"] = max_tok
+    response = client.chat.completions.create(**create_kw)
     content_parts, reasoning_parts = _collect_stream_chunks(response)
     yield from _sanitize_stream(content_parts, reasoning_parts)
 

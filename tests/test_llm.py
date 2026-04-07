@@ -18,6 +18,7 @@ from paperrag.llm import (
     _sanitize_stream,
     _strip_think_blocks,
     _strip_trailing_source_footers,
+    _thinking_ctx_size,
     _thinking_max_tokens,
     _llama_server_clients,
     _llama_server_procs,
@@ -226,12 +227,32 @@ def test_thinking_max_tokens_think_off():
 
 def test_thinking_max_tokens_think_on():
     cfg = LLMConfig(max_tokens=256, think=True)
-    assert _thinking_max_tokens(cfg) == 256 * 4
+    assert _thinking_max_tokens(cfg) is None
 
 
 def test_thinking_max_tokens_think_on_custom():
     cfg = LLMConfig(max_tokens=512, think=True)
-    assert _thinking_max_tokens(cfg) == 512 * 4
+    assert _thinking_max_tokens(cfg) is None
+
+
+# ---------------------------------------------------------------------------
+# _thinking_ctx_size
+# ---------------------------------------------------------------------------
+
+
+def test_thinking_ctx_size_think_off():
+    cfg = LLMConfig(ctx_size=2048, think=False)
+    assert _thinking_ctx_size(cfg) == 2048
+
+
+def test_thinking_ctx_size_think_on_default():
+    cfg = LLMConfig(ctx_size=2048, think=True)
+    assert _thinking_ctx_size(cfg) == 16384
+
+
+def test_thinking_ctx_size_think_on_large_ctx():
+    cfg = LLMConfig(ctx_size=32768, think=True)
+    assert _thinking_ctx_size(cfg) == 32768
 
 
 # ---------------------------------------------------------------------------
