@@ -182,6 +182,15 @@ def test_strip_think_blocks_multiple_blocks():
     assert "<think>" not in result
 
 
+def test_strip_think_blocks_leading_text_before_think():
+    """Visible text before the first <think> block should be preserved."""
+    text = "Intro. <think>reasoning</think> Answer."
+    result = _strip_think_blocks(text)
+    assert "Intro." in result
+    assert "Answer." in result
+    assert "<think>" not in result
+
+
 def test_strip_think_blocks_multiline_reasoning():
     text = (
         "<think>\n"
