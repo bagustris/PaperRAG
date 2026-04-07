@@ -26,7 +26,7 @@ except RuntimeError:
 from paperrag.config import PaperRAGConfig, load_rc, apply_rc, PROMPT_PRESETS, PRESET_MAX_TOKENS
 from paperrag import __version__
 
-_EXAMPLES_EPILOG = (
+EXAMPLES_EPILOG = (
     "Examples:\n\n"
     "  paperrag                              # auto-discover index from CWD\n\n"
     "  paperrag --index-dir /path/to/index   # REPL with a specific index\n\n"
@@ -38,7 +38,7 @@ _EXAMPLES_EPILOG = (
 app = typer.Typer(
     name="paperrag",
     help="PaperRAG - local RAG for academic PDFs.",
-    epilog=_EXAMPLES_EPILOG,
+    epilog=EXAMPLES_EPILOG,
     invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )

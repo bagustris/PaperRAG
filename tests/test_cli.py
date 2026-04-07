@@ -415,7 +415,7 @@ def test_entrypoint_help_contains_examples():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    # The docstring examples must appear in the help output.
+    # The epilog examples must appear in the help output.
     assert "paperrag index" in result.output
     assert "paperrag query" in result.output
 
