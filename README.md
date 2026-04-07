@@ -78,16 +78,16 @@ command line for `pip` and `uv pip`. Pure `uv sync` remains CPU-only by design.
 
 | Device (CPU/GPU) | Backend | Models | Size |
 |--------|---------|-------------|------|
-| CPU | Ollama | `qwen2.5:1.5b` (default recommended) | 986 MB |
+| CPU | Ollama | `qwen2.5:1.5b` (CPU recommended) | 986 MB |
 | CPU | Ollama | `qwen3:1.7b` | 1.4 GB |
 | GPU | Ollama | `llama3.2:3b` | 2 GB |
 | CPU/GPU | Ollama | `phi4-mini-reasoning:latest` | 3.2 GB |
 | CPU/GPU | Ollama | `gemma3:1b` | 815 MB |
 | GPU | Ollama | `gemma3:12b` | 8.1 GB |
 | GPU | Ollama | `phi4-mini:latest` | 2.5 GB |
-| GPU | Ollama | `gemma4:e4b` | 9.6 GB |
 | CPU/GPU | llama.cpp) | `LFM2.5-1.2B-Instruct-Q4_K_M.gguf` | 731 MB |
 | CPU/GPU | llama.cpp) | `LFM2-1.2B-RAG-Q4_K_M.gguf` | 731 MB |
+| CPU/GPU | llama.cpp) | `hf.co/Qwen/Qwen3-8B-GGUF:Q8_0` (GPU recommended)| 8.7 GB |
 
 For other Hugging Face GGUF models, prefer quantizations such as `Q4_K_M`, `Q8_0`, or similar variants available in the same repo. Example:
 
