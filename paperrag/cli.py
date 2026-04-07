@@ -165,10 +165,13 @@ def entrypoint(
 
         if input_dir:
             console.print(
-                "[yellow]⚠ Warning: --input-dir / -d is for indexing only and has no "
-                "effect here.\n"
-                "  To index PDFs run: paperrag index --input-dir <path>\n"
-                "  To start the REPL use: paperrag --index-dir <path>[/yellow]"
+                "[yellow]⚠ Warning: --input-dir / -d does not auto-index PDFs when "
+                "starting the REPL directly.\n"
+                "  It may still be used by REPL features (for example, PDF discovery "
+                "or as the default target for /index).\n"
+                "  To index PDFs immediately run: paperrag index --input-dir <path>\n"
+                "  To start the REPL with a specific index use: paperrag --index-dir "
+                "<path>[/yellow]"
             )
 
         cfg = PaperRAGConfig()
