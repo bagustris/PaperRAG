@@ -36,6 +36,8 @@ Best for multiple queries — index is loaded once and reused.
 
     paperrag -i /path/to/index
 
+Use `/no-llm` if you want the REPL to show retrieval results only, without generating answers. Use `/no-llm on|off` when you want to set that mode explicitly.
+
 REPL commands:
 
 | Command | Description |
@@ -50,6 +52,8 @@ REPL commands:
 | `/max-tokens <n>` | Set max output tokens |
 | `/ctx-size <n>` | Set LLM context window size |
 | `/prompt <text>` | Set the system prompt |
+| `/no-llm` | Toggle retrieval-only mode for subsequent queries |
+| `/no-llm on\|off` | Explicitly enable or disable retrieval-only mode |
 | `/model <name>` | Switch the active model/backend |
 | `/config` | Show current settings |
 | `/rc` | Show loaded `.paperragrc` files |
@@ -83,6 +87,9 @@ Default index location:
 
     paperrag query "what is speech chain?" -i /path/to/index
     paperrag query "what is speech chain?" -i /path/to/index --topk 5
+    paperrag query "what is speech chain?" -i /path/to/index --no-llm
+
+`--no-llm` prints scored chunk snippets directly and skips the LLM call.
 
 Note: each invocation reloads the index. Use REPL for multiple queries.
 

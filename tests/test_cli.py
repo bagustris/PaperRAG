@@ -2,12 +2,14 @@
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
 from paperrag.cli import app
+from paperrag.config import PaperRAGConfig
 from paperrag.vectorstore import VectorStore
 
 TMP_DIR = Path("/tmp/paperrag_test_cli")
@@ -140,6 +142,8 @@ def test_repl_help_text_documents_index_path():
     from paperrag.repl import HELP_TEXT
 
     assert "/index <path>" in HELP_TEXT
+    assert "/no-llm" in HELP_TEXT
+    assert "/no-llm on|off" in HELP_TEXT
 
 
 def test_repl_slash_commands_list():
@@ -147,7 +151,7 @@ def test_repl_slash_commands_list():
     from paperrag.repl import SLASH_COMMANDS
 
     required = {"/index", "/topk", "/threshold", "/temperature", "/max-tokens",
-                "/model", "/config", "/rc", "/help", "/exit", "/quit"}
+                "/no-llm", "/model", "/config", "/rc", "/help", "/exit", "/quit"}
     assert required.issubset(set(SLASH_COMMANDS))
 
 
@@ -424,3 +428,164 @@ def test_entrypoint_help_contains_examples():
     assert "paperrag index" in result.output
     assert "paperrag query" in result.output
 
+
+def test_query_no_llm_prints_retrieval_results(tmp_path):
+    """query --no-llm should print retrieval results and skip answer generation."""
+    runner = CliRunner()
+    fake_results = [
+        SimpleNamespace(
+            text="Transformers use attention mechanisms to relate tokens across positions.",
+            score=0.6789,
+            paper_title="Attention Is All You Need",
+            section_name="Introduction",
+            file_path=str(tmp_path / "paper.pdf"),
+            chunk_id=3,
+        ),
+        SimpleNamespace(
+            text="Scaled dot-product attention computes weighted sums over value vectors.",
+            score=0.6123,
+            paper_title="Attention Is All You Need",
+            section_name="Method",
+            file_path=str(tmp_path / "paper.pdf"),
+            chunk_id=4,
+        ),
+    ]
+
+    class FakeRetriever:
+        def retrieve(self, question, top_k=None):
+            assert question == "What is attention?"
+            assert top_k == 2
+            return fake_results
+
+    with patch("paperrag.retriever.Retriever", return_value=FakeRetriever()):
+        result = runner.invoke(
+            app,
+            [
+                "query",
+                "What is attention?",
+                "--index-dir",
+                str(tmp_path),
+                "--top-k",
+                "2",
+                "--no-llm",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Retrieved Chunks" in result.output
+    assert "paper.pdf | Introduction | chunk 3" in result.output
+    assert "Transformers use attention mechanisms" in result.output
+    assert "Answer:" not in result.output
+
+
+def test_repl_no_llm_toggles_retrieval_only_mode(tmp_path):
+    """REPL /no-llm should pass use_llm=False into query handling."""
+    index_path = tmp_path / ".paperrag-index"
+    index_path.mkdir()
+    store = VectorStore(index_path, 384)
+    store.version = 1
+    store.save()
+
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 dummy")
+
+    commands = iter(["/no-llm", "What is attention?", "/quit"])
+
+    class DummySession:
+        def prompt(self, _prompt_text):
+            return next(commands)
+
+    with (
+        patch("paperrag.parser.discover_pdfs", return_value=[pdf_path]),
+        patch("paperrag.repl.PromptSession", return_value=DummySession()),
+        patch("paperrag.repl._ensure_retriever", return_value=object()),
+        patch(
+            "paperrag.repl._handle_query",
+            return_value={"question": "What is attention?", "answer": "retrieval-only", "sources": ["paper.pdf"]},
+        ) as mock_handle_query,
+        patch("paperrag.llm.prewarm_ollama", return_value=False),
+    ):
+        from paperrag.repl import start_repl
+
+        start_repl(PaperRAGConfig(input_dir=str(tmp_path)))
+
+    assert mock_handle_query.call_count == 1
+    assert mock_handle_query.call_args.kwargs["use_llm"] is False
+
+
+def test_repl_no_llm_on_off_controls_mode_explicitly(tmp_path):
+    """REPL /no-llm on|off should explicitly control retrieval-only mode."""
+    index_path = tmp_path / ".paperrag-index"
+    index_path.mkdir()
+    store = VectorStore(index_path, 384)
+    store.version = 1
+    store.save()
+
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 dummy")
+
+    commands = iter(["/no-llm on", "first question", "/no-llm off", "second question", "/quit"])
+
+    class DummySession:
+        def prompt(self, _prompt_text):
+            return next(commands)
+
+    with (
+        patch("paperrag.parser.discover_pdfs", return_value=[pdf_path]),
+        patch("paperrag.repl.PromptSession", return_value=DummySession()),
+        patch("paperrag.repl._ensure_retriever", return_value=object()),
+        patch(
+            "paperrag.repl._handle_query",
+            side_effect=[
+                {"question": "first question", "answer": "retrieval-only", "sources": ["paper.pdf"]},
+                {"question": "second question", "answer": "with-llm", "sources": ["paper.pdf"]},
+            ],
+        ) as mock_handle_query,
+        patch("paperrag.llm.prewarm_ollama", return_value=False),
+    ):
+        from paperrag.repl import start_repl
+
+        start_repl(PaperRAGConfig(input_dir=str(tmp_path)))
+
+    assert mock_handle_query.call_count == 2
+    first_call = mock_handle_query.call_args_list[0]
+    second_call = mock_handle_query.call_args_list[1]
+    assert first_call.kwargs["use_llm"] is False
+    assert second_call.kwargs["use_llm"] is True
+
+
+def test_repl_no_llm_invalid_argument_shows_usage(tmp_path):
+    """REPL /no-llm should show usage for invalid arguments."""
+    index_path = tmp_path / ".paperrag-index"
+    index_path.mkdir()
+    store = VectorStore(index_path, 384)
+    store.version = 1
+    store.save()
+
+    pdf_path = tmp_path / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 dummy")
+
+    commands = iter(["/no-llm maybe", "/quit"])
+
+    class DummySession:
+        def prompt(self, _prompt_text):
+            return next(commands)
+
+    with (
+        patch("paperrag.parser.discover_pdfs", return_value=[pdf_path]),
+        patch("paperrag.repl.PromptSession", return_value=DummySession()),
+        patch("paperrag.repl._ensure_retriever", return_value=object()),
+        patch("paperrag.repl._handle_query") as mock_handle_query,
+        patch("paperrag.llm.prewarm_ollama", return_value=False),
+        patch("paperrag.repl.console.print") as mock_print,
+    ):
+        from paperrag.repl import start_repl
+
+        start_repl(PaperRAGConfig(input_dir=str(tmp_path)))
+
+    mock_handle_query.assert_not_called()
+    assert any(
+        "Usage: /no-llm [on|off]" in str(call.args[0])
+        for call in mock_print.call_args_list
+        if call.args
+    )

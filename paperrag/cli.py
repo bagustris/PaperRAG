@@ -32,6 +32,7 @@ EXAMPLES_EPILOG = (
     "  paperrag --index-dir /path/to/index   # REPL with a specific index\n\n"
     "  paperrag index --input-dir ./papers   # index PDFs first\n\n"
     "  paperrag query \"What is attention?\"   # one-shot query\n\n"
+    "  paperrag query \"What is attention?\" --no-llm   # raw retrieval results\n\n"
     "  paperrag review paper.pdf             # index + review a single PDF\n"
 )
 
@@ -831,6 +832,9 @@ def query(
     model: str = typer.Option(
         None, "--model", "-m", help="LLM model name (e.g., qwen3:1.7b)"
     ),
+    no_llm: bool = typer.Option(
+        False, "--no-llm", help="Return raw retrieval results without calling the LLM"
+    ),
     think: bool = typer.Option(
         False, "--think/--no-think", help="Enable thinking/reasoning mode for supported models (e.g. Qwen3)"
     ),
@@ -910,9 +914,25 @@ def query(
         console.print("[yellow]No results found.[/yellow]")
         raise typer.Exit(0)
 
+    from pathlib import Path as PathlibPath
+
+    if no_llm:
+        console.print(f"\n[bold]Retrieved Chunks[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
+        for i, result in enumerate(results, start=1):
+            filename = PathlibPath(result.file_path).name
+            snippet = re.sub(r"\s+", " ", result.text).strip()
+            if len(snippet) > 200:
+                snippet = snippet[:197].rstrip() + "..."
+            console.print(
+                f"  [cyan][{i}][/cyan] {filename} | {result.section_name} | "
+                f"chunk {result.chunk_id} [dim]({result.score:.2f})[/dim]"
+            )
+            console.print(f"      {snippet}")
+        console.print(f"\n[dim]Retrieval only: {t_retrieval:.2f}s[/dim]\n")
+        return
+
     import sys
     from paperrag.llm import stream_answer
-    from pathlib import Path as PathlibPath
 
     # Show retrieved sources immediately so the user sees useful info
     # while waiting for the LLM to generate.

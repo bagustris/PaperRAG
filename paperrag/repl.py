@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from prompt_toolkit import HTML, PromptSession
@@ -35,6 +36,7 @@ SLASH_COMMANDS: list[str] = [
     "/prompt",
     "/preset",
     "/export",
+    "/no-llm",
     "/think",
     "/model",
     "/config",
@@ -46,7 +48,7 @@ SLASH_COMMANDS: list[str] = [
 
 HELP_TEXT = """\
 [bold]Available commands:[/bold]
-  [cyan]<any text>[/cyan]              Query the indexed papers (uses top-k retrieval + LLM)
+  [cyan]<any text>[/cyan]              Query the indexed papers (uses top-k retrieval, with LLM unless /no-llm is active)
   [cyan]/index[/cyan]                  Re-index the current PDF directory/file
   [cyan]/index <path>[/cyan]           Re-index a specific PDF file or directory
   [cyan]/focus <substring>[/cyan]     Focus all subsequent queries on a specific paper
@@ -61,6 +63,8 @@ HELP_TEXT = """\
   [cyan]/preset <name>[/cyan]         Switch to a named prompt preset: default, reviewer, summarizer, explainer
   [cyan]/export[/cyan]                 Export this session's Q&A to a markdown file (auto-named)
   [cyan]/export <path>[/cyan]          Export to a specific file path
+  [cyan]/no-llm[/cyan]                 Toggle retrieval-only mode (disable LLM answers)
+  [cyan]/no-llm on|off[/cyan]          Explicitly enable or disable retrieval-only mode
   [cyan]/think[/cyan]                  Toggle thinking/reasoning mode (for models like Qwen3, default: off)
   [cyan]/model <name>[/cyan]           Switch LLM model/backend: Ollama name, local .gguf path, or HF repo (e.g. Qwen/Qwen3-1.7B-GGUF)
   [cyan]/config[/cyan]                 Show current configuration
@@ -187,6 +191,7 @@ def start_repl(
     top_k = cfg.retriever.top_k
     focused_file: str | None = None
     session_log: list[dict] = []  # tracks Q&A pairs for /export
+    use_llm = True
 
     # Eagerly load the retriever (including embedding model) at startup
     # so the first query doesn't pay the ~6s model-loading penalty.
@@ -448,6 +453,24 @@ def start_repl(
             console.print(f"[green]Session exported to {export_path}[/green]")
             continue
 
+        if cmd_parts[0] == "/no-llm":
+            if len(cmd_parts) == 2:
+                arg = cmd_parts[1].strip().lower()
+                if arg == "on":
+                    use_llm = False
+                elif arg == "off":
+                    use_llm = True
+                else:
+                    console.print("[yellow]Usage: /no-llm [on|off][/yellow]")
+                    continue
+            else:
+                use_llm = not use_llm
+            if use_llm:
+                console.print("LLM mode: [green]on[/green]")
+            else:
+                console.print("LLM mode: [yellow]off[/yellow] [dim](retrieval-only)[/dim]")
+            continue
+
         if cmd_parts[0] == "/think":
             cfg.llm.think = not cfg.llm.think
             state = "[green]on[/green]" if cfg.llm.think else "[dim]off[/dim]"
@@ -508,6 +531,8 @@ def start_repl(
             console.print(f"  CPU threads (llama.cpp): [cyan]{n_threads_label}[/cyan]")
             think_label = "[green]on[/green]" if cfg.llm.think else "[dim]off[/dim]"
             console.print(f"  Thinking mode: {think_label}")
+            llm_calls_label = "[green]enabled[/green]" if use_llm else "[yellow]disabled[/yellow] [dim](retrieval-only)[/dim]"
+            console.print(f"  LLM calls: {llm_calls_label}")
             active_preset = next(
                 (k for k, v in PROMPT_PRESETS.items() if v == cfg.llm.system_prompt), None
             )
@@ -550,7 +575,14 @@ def start_repl(
         retriever = _ensure_retriever(retriever, cfg)
         if retriever is None:
             continue
-        entry = _handle_query(command, retriever, cfg, top_k=top_k, focused_file=focused_file)
+        entry = _handle_query(
+            command,
+            retriever,
+            cfg,
+            top_k=top_k,
+            focused_file=focused_file,
+            use_llm=use_llm,
+        )
         if entry is not None:
             session_log.append(entry)
 
@@ -575,6 +607,7 @@ def _handle_query(
     *,
     top_k: int,
     focused_file: str | None = None,
+    use_llm: bool = True,
 ) -> "dict | None":
     """Run retrieval and LLM for a user question.
 
@@ -592,6 +625,36 @@ def _handle_query(
             msg += f" [dim](threshold={cfg.retriever.score_threshold} — try /threshold 0.1 to widen the search)[/dim]"
         console.print(msg)
         return None
+
+    if not use_llm:
+        console.print(f"\n[bold]Retrieved Chunks[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
+        entries: list[str] = []
+        sources: list[str] = []
+        seen_source_paths: set[str] = set()
+        for i, result in enumerate(results, start=1):
+            filename = Path(result.file_path).name
+            if result.file_path not in seen_source_paths:
+                seen_source_paths.add(result.file_path)
+                sources.append(filename)
+            snippet = re.sub(r"\s+", " ", result.text).strip()
+            if len(snippet) > 200:
+                snippet = snippet[:197].rstrip() + "..."
+            console.print(
+                f"  [cyan][{i}][/cyan] {filename} | {result.section_name} | "
+                f"chunk {result.chunk_id} [dim]({result.score:.2f})[/dim]"
+            )
+            console.print(f"      {snippet}")
+            entries.append(
+                f"[{i}] {filename} | {result.section_name} | "
+                f"chunk {result.chunk_id} | score={result.score:.2f}\n{snippet}"
+            )
+        t_total = time.perf_counter() - t0
+        console.print(f"\n[dim]Retrieval only: {t_retrieval:.2f}s | Total: {t_total:.2f}s[/dim]\n")
+        return {
+            "question": question,
+            "answer": "\n\n".join(entries),
+            "sources": sources,
+        }
 
     # Show retrieved sources immediately so the user sees useful info
     # while waiting for the LLM to generate.

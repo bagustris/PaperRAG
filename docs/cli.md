@@ -108,6 +108,8 @@ paperrag review ~/papers/paper.pdf --index-dir /tmp/paperrag-review
 
 Run a one-off query against the indexed papers.
 
+Use `--no-llm` to stop after retrieval and print chunk-level results directly.
+
 ```
 paperrag query QUESTION [OPTIONS]
 ```
@@ -118,6 +120,7 @@ paperrag query QUESTION [OPTIONS]
 | `--input-dir PATH` | `-d` | PDF directory |
 | `--top-k N` | `-k` | Number of results (default: 3) |
 | `--threshold FLOAT` | `-t` | Similarity score threshold (0.0-1.0) |
+| `--no-llm` | | Skip answer generation and print raw retrieval results |
 | `--temperature FLOAT` | | LLM temperature (0.0-2.0) |
 | `--max-tokens N` | | Maximum response tokens (default: 256) |
 | `--ctx-size N` | | LLM context window size (default: 2048) |
@@ -135,6 +138,9 @@ paperrag query "summarize the paper" --index-dir ~/papers -m ./models/qwen3-1.7b
 
 # Query with a HuggingFace GGUF repo through llama.cpp
 paperrag query "summarize the paper" --index-dir ~/papers -m Qwen/Qwen3-1.7B-GGUF
+
+# Retrieval-only mode (no LLM call)
+paperrag query "attention mechanism" --index-dir ~/papers --no-llm
 
 # Adjust retrieval parameters
 paperrag query "attention mechanism" --index-dir ~/papers -k 10 -t 0.3 --max-tokens 512
@@ -176,8 +182,12 @@ Inside the REPL, all control commands are slash-prefixed:
 | `/max-tokens <n>` | Set maximum response tokens |
 | `/ctx-size <n>` | Set LLM context window size |
 | `/prompt <text>` | Set the system prompt |
+| `/no-llm` | Toggle retrieval-only mode for subsequent queries |
+| `/no-llm on\|off` | Explicitly enable or disable retrieval-only mode |
 | `/model <name>` | Switch the active LLM backend/model |
 | `/config` | Show the current effective configuration |
 | `/rc` | Show loaded `.paperragrc` files and values |
 | `/help` | Show REPL help |
 | `/exit` or `/quit` | Exit the REPL |
+
+When `/no-llm` mode is active, queries stop after retrieval and print scored chunk snippets instead of generating an answer. Use `/no-llm on` or `/no-llm off` when you want an explicit state change instead of a toggle.

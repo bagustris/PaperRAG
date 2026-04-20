@@ -122,6 +122,9 @@ Or point to the index directory explicitly:
 ### Query a single question
 
     paperrag query "what is speech chain?" -i /path/to/.paperrag-index
+    paperrag query "what is speech chain?" -i /path/to/.paperrag-index --no-llm
+
+Use `--no-llm` when you want to inspect retrieval results directly without starting answer generation.
 
 ### Review a single paper
 
@@ -168,11 +171,12 @@ Retrieval: 0.05s | LLM: 8.65s | Total: 8.69s
 | `--model, -m` | `qwen2.5:1.5b` | Ollama model name |
 | `--top-k, --topk, -k` | `3` | Chunks to retrieve |
 | `--threshold, -t` | `0.1` | Minimum similarity score |
+| `--no-llm` | `off` | Skip answer generation and print raw retrieval results |
 | `--temperature` | `0.0` | LLM temperature (0=deterministic) |
 | `--ctx-size` | `2048` | LLM context window size |
 | `--max-tokens` | `256` | Max output tokens |
 
-The REPL also accepts `/preset`, `/prompt`, `/ctx-size`, `/export`, `/config`, and `/rc` for interactive tuning and session export.
+The REPL also accepts `/preset`, `/prompt`, `/ctx-size`, `/export`, `/no-llm`, `/config`, and `/rc` for interactive tuning and session export. Use `/no-llm` to toggle retrieval-only mode, or `/no-llm on|off` to set it explicitly for subsequent queries.
 
 ------------------------------------------------------------------------
 
