@@ -1,4 +1,5 @@
-# PaperRAG
+# PaperRAG  
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/bagustris/PaperRAG)  
 
 Local-first Retrieval-Augmented Generation (RAG) system for querying academic PDF collections.
 
