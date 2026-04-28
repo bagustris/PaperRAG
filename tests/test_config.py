@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from paperrag.config import PaperRAGConfig
+from paperrag.config import PaperRAGConfig, apply_rc
 
 
 def test_default_config():
@@ -64,3 +64,10 @@ def test_index_dir_for_single_pdf(tmp_path):
     pdf_file.write_bytes(b"")
     cfg = PaperRAGConfig(input_dir=str(pdf_file))
     assert cfg.index_dir == str(tmp_path / ".paperrag-index")
+
+
+def test_rc_embed_model():
+    """Verify that embed-model RC key sets cfg.embedder.model_name."""
+    cfg = PaperRAGConfig()
+    apply_rc(cfg, {"embed-model": "sentence-transformers/all-mpnet-base-v2"})
+    assert cfg.embedder.model_name == "sentence-transformers/all-mpnet-base-v2"

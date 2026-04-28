@@ -26,6 +26,7 @@ _RC_KEY_MAP: dict[str, tuple[str, type]] = {
     "n-gpu-layers": ("llm.n_gpu_layers", int),
     "n-threads": ("llm.n_threads", int),
     "think": ("llm.think", bool),
+    "embed-model": ("embedder.model_name", str),
 }
 
 

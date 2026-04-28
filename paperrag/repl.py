@@ -540,6 +540,7 @@ def start_repl(
                 console.print(f"  Active preset: [cyan]{active_preset}[/cyan]")
             console.print(f"  System prompt: [dim]{cfg.llm.system_prompt}[/dim]")
             console.print("[bold]Retrieval:[/bold]")
+            console.print(f"  Embed model: [cyan]{cfg.embedder.model_name}[/cyan]")
             console.print(f"  Top-k: [cyan]{cfg.retriever.top_k}[/cyan]")
             console.print(f"  Threshold: [cyan]{cfg.retriever.score_threshold}[/cyan]")
             if focused_file:

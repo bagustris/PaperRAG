@@ -318,6 +318,11 @@ def index(
         "--manifest",
         help="CSV manifest file with columns: filename,title,authors,abstract,doi (speeds up indexing)",
     ),
+    embed_model: str = typer.Option(
+        None,
+        "--embed-model",
+        help="Sentence-Transformers model name or local path for embedding (default: sentence-transformers/all-MiniLM-L6-v2)",
+    ),
 ) -> None:
     """Index PDF files into the FAISS vector store."""
     from paperrag.chunker import chunk_paper
@@ -355,6 +360,9 @@ def index(
         cfg.indexing.checkpoint_interval = checkpoint_interval
     if workers is not None:
         cfg.indexing.n_workers = workers
+    if embed_model:
+        cfg.embedder.model_name = embed_model
+        console.print(f"[cyan]Embed model: {cfg.embedder.model_name}[/cyan]")
 
     # Set OCR mode with validation
     ocr_lower = ocr.lower()

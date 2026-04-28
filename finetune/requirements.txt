@@ -1,0 +1,23 @@
+# Fine-tuning dependencies (not part of base PaperRAG)
+# Install with: pip install -r finetune/requirements.txt
+
+# --- Embedding model fine-tuning ---
+rank-bm25>=0.2.2          # Hard negative mining via BM25
+# sentence-transformers   # Already in paperrag core
+
+# --- LLM fine-tuning (GPU required for finetune_llm.py) ---
+# Install one of the following depending on your CUDA version:
+#
+#   CUDA 12.1+:
+#     pip install "unsloth[cu121-torch240]"
+#   CUDA 11.8:
+#     pip install "unsloth[cu118-torch240]"
+#   CPU only / Google Colab:
+#     pip install "unsloth[colab-new]"
+#
+# Then install the rest:
+trl>=0.8.0
+transformers>=4.40.0
+datasets>=2.18.0
+accelerate>=0.28.0
+bitsandbytes>=0.43.0      # 4-bit quantization (requires CUDA)
