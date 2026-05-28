@@ -191,6 +191,7 @@ def start_repl(
     top_k = cfg.retriever.top_k
     focused_file: str | None = None
     session_log: list[dict] = []  # tracks Q&A pairs for /export
+    conversation_history: list[dict] = []  # tracks messages for follow-up questions
     use_llm = True
 
     # Eagerly load the retriever (including embedding model) at startup
@@ -583,9 +584,18 @@ def start_repl(
             top_k=top_k,
             focused_file=focused_file,
             use_llm=use_llm,
+            conversation_history=conversation_history if use_llm else None,
         )
         if entry is not None:
             session_log.append(entry)
+            # Update conversation history for follow-up questions
+            if use_llm and entry.get("answer"):
+                conversation_history.append({"role": "user", "content": command})
+                conversation_history.append({"role": "assistant", "content": entry["answer"]})
+                # Keep conversation history bounded to avoid exceeding context limits
+                _MAX_HISTORY_TURNS = 10  # 10 pairs of user/assistant messages
+                if len(conversation_history) > _MAX_HISTORY_TURNS * 2:
+                    conversation_history[:] = conversation_history[-_MAX_HISTORY_TURNS * 2:]
 
 
 def _ensure_retriever(retriever, cfg: PaperRAGConfig, store=None):
@@ -609,6 +619,7 @@ def _handle_query(
     top_k: int,
     focused_file: str | None = None,
     use_llm: bool = True,
+    conversation_history: list[dict] | None = None,
 ) -> "dict | None":
     """Run retrieval and LLM for a user question.
 
@@ -621,6 +632,9 @@ def _handle_query(
     t_retrieval = time.perf_counter() - t0
 
     if not results:
+        # If there's conversation history, attempt a follow-up answer
+        if use_llm and conversation_history:
+            return _handle_followup(question, cfg, conversation_history, t0)
         msg = "[yellow]No results found.[/yellow]"
         if cfg.retriever.score_threshold > 0.1:
             msg += f" [dim](threshold={cfg.retriever.score_threshold} — try /threshold 0.1 to widen the search)[/dim]"
@@ -680,7 +694,7 @@ def _handle_query(
         source_files = [r.file_path for r in results]
         header_printed = False
         t1 = time.perf_counter()
-        for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files):
+        for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files, conversation_history=conversation_history):
             if not header_printed:
                 console.print("\n[bold green]Answer:[/bold green]")
                 header_printed = True
@@ -712,6 +726,54 @@ def _handle_query(
         "question": question,
         "answer": full_answer,
         "sources": [Path(fp).name for fp in seen_files],
+    }
+
+
+def _handle_followup(
+    question: str,
+    cfg: PaperRAGConfig,
+    conversation_history: list[dict],
+    t0: float,
+) -> "dict | None":
+    """Handle a follow-up question using conversation history when retrieval returns no results."""
+    import sys
+    import time
+
+    from paperrag.llm import stream_followup
+
+    console.print("[dim](No new sources found — answering from conversation history)[/dim]")
+
+    full_answer = ""
+    try:
+        header_printed = False
+        t1 = time.perf_counter()
+        for chunk in stream_followup(question, conversation_history, cfg.llm):
+            if not header_printed:
+                console.print("\n[bold green]Answer:[/bold green]")
+                header_printed = True
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+            full_answer += chunk
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
+        t_llm = time.perf_counter() - t1
+        t_total = time.perf_counter() - t0
+        console.print(f"[dim]LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n")
+    except ImportError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        return None
+    except Exception as exc:
+        from paperrag.llm import describe_llm_error
+        error_msg, hint = describe_llm_error(exc, cfg.llm.model_name)
+        console.print(f"[red]{error_msg}[/red]")
+        if hint:
+            console.print(f"[yellow]Fix: {hint}[/yellow]")
+        return None
+
+    return {
+        "question": question,
+        "answer": full_answer,
+        "sources": [],
     }
 
 

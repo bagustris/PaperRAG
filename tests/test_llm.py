@@ -337,3 +337,45 @@ def test_describe_llm_error_ollama_generic():
     msg, hint = describe_llm_error(exc, "qwen2.5:1.5b")
     assert "LLM error" in msg
     assert hint is None
+
+
+# ---------------------------------------------------------------------------
+# Conversation history support
+# ---------------------------------------------------------------------------
+
+
+def test_build_messages_with_conversation_history():
+    """Conversation history should be inserted between system prompt and user message."""
+    history = [
+        {"role": "user", "content": "What is speech chain?"},
+        {"role": "assistant", "content": "Speech chain is a method of voice conversion."},
+    ]
+    msgs = _build_messages("What is the remaining problem?", ["ctx"], "llama3", "System", conversation_history=history)
+    assert len(msgs) == 4
+    assert msgs[0]["role"] == "system"
+    assert msgs[1] == history[0]
+    assert msgs[2] == history[1]
+    assert msgs[3]["role"] == "user"
+    assert "remaining problem" in msgs[3]["content"]
+
+
+def test_build_messages_without_conversation_history():
+    """Without history, messages should be system + user only (backward compatible)."""
+    msgs = _build_messages("Q?", ["ctx"], "llama3", "System", conversation_history=None)
+    assert len(msgs) == 2
+    assert msgs[0]["role"] == "system"
+    assert msgs[1]["role"] == "user"
+
+
+def test_build_messages_empty_conversation_history():
+    """Empty history list should behave the same as None."""
+    msgs = _build_messages("Q?", ["ctx"], "llama3", "System", conversation_history=[])
+    assert len(msgs) == 2
+
+
+def test_stream_followup_no_history():
+    """stream_followup with empty history should yield a message about missing history."""
+    from paperrag.llm import stream_followup
+    result = list(stream_followup("follow-up question", []))
+    assert len(result) == 1
+    assert "No conversation history" in result[0]

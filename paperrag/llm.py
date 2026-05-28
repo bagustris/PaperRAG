@@ -459,7 +459,7 @@ def _get_or_start_llama_server(model_path: str, ctx_size: int, n_gpu_layers: int
 # ---------------------------------------------------------------------------
 
 
-def _build_messages(question: str, context_chunks: list[str], model_name: str, system_prompt: str, source_labels: list[int] | None = None, think: bool = False) -> list[dict]:
+def _build_messages(question: str, context_chunks: list[str], model_name: str, system_prompt: str, source_labels: list[int] | None = None, think: bool = False, conversation_history: list[dict] | None = None) -> list[dict]:
     """Build the chat messages list from question, context chunks, and model name."""
     user_prompt = _build_prompt(question, context_chunks, source_labels=source_labels)
 
@@ -471,10 +471,14 @@ def _build_messages(question: str, context_chunks: list[str], model_name: str, s
         if not think:
             user_prompt += " /no_think"
 
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+
+    # Include conversation history for follow-up questions
+    if conversation_history:
+        messages.extend(conversation_history)
+
+    messages.append({"role": "user", "content": user_prompt})
+    return messages
 
 
 def _prepare(
@@ -482,12 +486,13 @@ def _prepare(
     context_chunks: list[str],
     config: LLMConfig,
     source_labels: list[int] | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> tuple:
     """Ollama-specific setup: build messages, get/cache OpenAI client, return (client, messages)."""
     global _client_cache
     from openai import OpenAI
 
-    messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels, think=config.think)
+    messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels, think=config.think, conversation_history=conversation_history)
 
     if _client_cache is not None:
         client = _client_cache
@@ -519,6 +524,7 @@ def generate_answer(
     question: str,
     context_chunks: list[str],
     config: LLMConfig | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> str:
     """Generate an answer using the configured LLM backend (blocking).
 
@@ -527,6 +533,12 @@ def generate_answer(
     * HuggingFace repo IDs (``org/repo``) and local ``.gguf`` file paths use
       **llama.cpp** via ``llama-server`` (install: ``brew install llama-cpp``).
     * All other model names delegate to **Ollama**.
+
+    Parameters
+    ----------
+    conversation_history : list[dict] | None
+        Optional list of previous messages (role/content dicts) to provide
+        context for follow-up questions.
 
     Examples::
 
@@ -547,7 +559,7 @@ def generate_answer(
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
         client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
-        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, think=config.think)
+        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, think=config.think, conversation_history=conversation_history)
         logger.info(
             "Calling llama-server (model=%s, temp=%.2f)", config.model_name, config.temperature
         )
@@ -560,7 +572,7 @@ def generate_answer(
         return _strip_trailing_source_footers(response.choices[0].message.content or "")
 
     try:
-        client, messages = _prepare(question, context_chunks, config)
+        client, messages = _prepare(question, context_chunks, config, conversation_history=conversation_history)
     except ImportError:
         raise ImportError(
             "The 'openai' package is required. Install with: uv pip install openai"
@@ -581,6 +593,7 @@ def stream_answer(
     context_chunks: list[str],
     config: LLMConfig | None = None,
     source_files: list[str] | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> Iterator[str]:
     """Yield text chunks as they arrive from the LLM (streaming).
 
@@ -589,6 +602,12 @@ def stream_answer(
     * HuggingFace repo IDs (``org/repo``) and local ``.gguf`` file paths use
       **llama.cpp** via ``llama-server``.
     * All other model names delegate to **Ollama**.
+
+    Parameters
+    ----------
+    conversation_history : list[dict] | None
+        Optional list of previous messages (role/content dicts) to provide
+        context for follow-up questions.
 
     Usage::
 
@@ -615,7 +634,7 @@ def stream_answer(
     if _is_llama_backend(config.model_name):
         model_path = _resolve_model_path(config.model_name)
         client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
-        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels, think=config.think)
+        messages = _build_messages(question, context_chunks, config.model_name, config.system_prompt, source_labels=source_labels, think=config.think, conversation_history=conversation_history)
         logger.info(
             "Calling llama-server streaming (model=%s, temp=%.2f)",
             config.model_name,
@@ -636,12 +655,97 @@ def stream_answer(
         return
 
     try:
-        client, messages = _prepare(question, context_chunks, config, source_labels=source_labels)
+        client, messages = _prepare(question, context_chunks, config, source_labels=source_labels, conversation_history=conversation_history)
     except ImportError:
         raise ImportError(
             "The 'openai' package is required. Install with: uv pip install openai"
         )
 
+    response = client.chat.completions.create(
+        model=config.model_name,
+        messages=messages,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        stream=True,
+        extra_body={"num_ctx": config.ctx_size, "keep_alive": "30m"},
+    )
+    yield from _sanitize_stream(
+        delta
+        for chunk in response
+        if (delta := chunk.choices[0].delta.content)
+    )
+
+
+def stream_followup(
+    question: str,
+    conversation_history: list[dict],
+    config: LLMConfig | None = None,
+) -> Iterator[str]:
+    """Yield text chunks for a follow-up question using conversation history only.
+
+    This is used when retrieval returns no results but conversation history
+    exists, allowing the LLM to answer based on previously discussed context.
+    """
+    config = config or LLMConfig()
+
+    if not conversation_history:
+        yield "No conversation history available to answer the question."
+        return
+
+    # Build messages with conversation history but no retrieval context
+    model_lower = config.model_name.lower()
+    user_prompt = question
+    if "qwen3" in model_lower or "qwen-3" in model_lower:
+        if not config.think:
+            user_prompt += " /no_think"
+
+    followup_system = (
+        "You are a helpful research assistant. "
+        "Answer the follow-up question based on the conversation so far. "
+        "If the previous conversation does not contain relevant information, say so. "
+        "Be concise."
+    )
+    messages: list[dict] = [{"role": "system", "content": followup_system}]
+    messages.extend(conversation_history)
+    messages.append({"role": "user", "content": user_prompt})
+
+    if _is_llama_backend(config.model_name):
+        model_path = _resolve_model_path(config.model_name)
+        client = _get_or_start_llama_server(model_path, config.ctx_size, config.n_gpu_layers, config.n_threads)
+        logger.info(
+            "Calling llama-server streaming follow-up (model=%s, temp=%.2f)",
+            config.model_name,
+            config.temperature,
+        )
+        response = client.chat.completions.create(  # type: ignore[union-attr]
+            model=os.path.basename(model_path),
+            messages=messages,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            stream=True,
+        )
+        yield from _sanitize_stream(
+            delta
+            for chunk in response
+            if (delta := chunk.choices[0].delta.content)
+        )
+        return
+
+    try:
+        from openai import OpenAI
+
+        global _client_cache
+        if _client_cache is not None:
+            client = _client_cache
+        else:
+            client = OpenAI(api_key="not-needed", base_url=_OLLAMA_API_URL)
+            _client_cache = client
+    except ImportError:
+        raise ImportError(
+            "The 'openai' package is required. Install with: uv pip install openai"
+        )
+
+    logger.info("Calling Ollama LLM follow-up (model=%s, temp=%.2f)", config.model_name, config.temperature)
     response = client.chat.completions.create(
         model=config.model_name,
         messages=messages,
