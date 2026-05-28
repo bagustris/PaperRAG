@@ -73,6 +73,14 @@ atexit.register(_cleanup_llama_servers)
 _MAX_CHUNK_CHARS = 750
 _TRAILING_SOURCE_LINE_RE = re.compile(r"^\s*Sources?:\s*\[[0-9,\s-]+\]\s*$", re.IGNORECASE)
 
+# System prompt used for follow-up questions answered from conversation history only.
+_FOLLOWUP_SYSTEM_PROMPT = (
+    "You are a helpful research assistant. "
+    "Answer the follow-up question based on the conversation so far. "
+    "If the previous conversation does not contain relevant information, say so. "
+    "Be concise."
+)
+
 
 def _build_prompt(question: str, context_chunks: list[str], source_labels: list[int] | None = None) -> str:
     context_lines = []
@@ -699,13 +707,7 @@ def stream_followup(
         if not config.think:
             user_prompt += " /no_think"
 
-    followup_system = (
-        "You are a helpful research assistant. "
-        "Answer the follow-up question based on the conversation so far. "
-        "If the previous conversation does not contain relevant information, say so. "
-        "Be concise."
-    )
-    messages: list[dict] = [{"role": "system", "content": followup_system}]
+    messages: list[dict] = [{"role": "system", "content": _FOLLOWUP_SYSTEM_PROMPT}]
     messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_prompt})
 

@@ -46,6 +46,9 @@ SLASH_COMMANDS: list[str] = [
     "/quit",
 ]
 
+# Maximum number of user/assistant turn pairs to keep in conversation history.
+_MAX_HISTORY_TURNS = 10
+
 HELP_TEXT = """\
 [bold]Available commands:[/bold]
   [cyan]<any text>[/cyan]              Query the indexed papers (uses top-k retrieval, with LLM unless /no-llm is active)
@@ -593,7 +596,7 @@ def start_repl(
                 conversation_history.append({"role": "user", "content": command})
                 conversation_history.append({"role": "assistant", "content": entry["answer"]})
                 # Keep conversation history bounded to avoid exceeding context limits
-                _MAX_HISTORY_TURNS = 10  # 10 pairs of user/assistant messages
+                # Keep conversation history bounded to avoid exceeding context limits
                 if len(conversation_history) > _MAX_HISTORY_TURNS * 2:
                     conversation_history[:] = conversation_history[-_MAX_HISTORY_TURNS * 2:]
 
