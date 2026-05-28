@@ -47,6 +47,8 @@ SLASH_COMMANDS: list[str] = [
 ]
 
 # Maximum number of user/assistant turn pairs to keep in conversation history.
+# 10 turns (20 messages) balances context for follow-ups while staying within
+# typical 4096-token context windows when combined with retrieval context.
 _MAX_HISTORY_TURNS = 10
 
 HELP_TEXT = """\

@@ -69,8 +69,9 @@ def _cleanup_llama_servers() -> None:
 atexit.register(_cleanup_llama_servers)
 
 # Maximum characters per context chunk sent to the LLM.
-# With ctx_size >= 4096, we allow larger chunks to preserve more context.
-# For smaller contexts, chunks are still truncated to keep prompt manageable.
+# Set to 2000 to accommodate typical chunk sizes (1000 chars) without truncation
+# when ctx_size is 4096+. Prevents loss of important context that causes
+# inferior answers compared to llama-server's full-document approach.
 _MAX_CHUNK_CHARS = 2000
 _TRAILING_SOURCE_LINE_RE = re.compile(r"^\s*Sources?:\s*\[[0-9,\s-]+\]\s*$", re.IGNORECASE)
 
@@ -108,6 +109,7 @@ def _build_prompt(question: str, context_chunks: list[str], source_labels: list[
     )
 
     # Use a more detailed instruction when we have substantial context
+    # (> 3000 chars ≈ 3+ full chunks, indicating rich retrieval or full-document mode)
     total_context_chars = sum(len(c) for c in context_chunks)
     if total_context_chars > 3000:
         answer_style = "Answer thoroughly using ONLY the context. Provide detailed reasoning and cite specific statements."
