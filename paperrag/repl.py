@@ -46,17 +46,22 @@ SLASH_COMMANDS: list[str] = [
     "/quit",
 ]
 
+# Maximum number of user/assistant turn pairs to keep in conversation history.
+# 10 turns (20 messages) balances context for follow-ups while staying within
+# typical 4096-token context windows when combined with retrieval context.
+_MAX_HISTORY_TURNS = 10
+
 HELP_TEXT = """\
 [bold]Available commands:[/bold]
   [cyan]<any text>[/cyan]              Query the indexed papers (uses top-k retrieval, with LLM unless /no-llm is active)
   [cyan]/index[/cyan]                  Re-index the current PDF directory/file
   [cyan]/index <path>[/cyan]           Re-index a specific PDF file or directory
   [cyan]/focus <substring>[/cyan]     Focus all subsequent queries on a specific paper
-  [cyan]/topk <n>[/cyan]               Set top-k for retrieval (default: 3)
-  [cyan]/threshold <n>[/cyan]          Set similarity threshold 0.0-1.0 (default: 0.15)
+  [cyan]/topk <n>[/cyan]               Set top-k for retrieval (default: 5)
+  [cyan]/threshold <n>[/cyan]          Set similarity threshold 0.0-1.0 (default: 0.1)
   [cyan]/temperature <n>[/cyan]        Set LLM temperature 0.0-2.0 (default: 0.0)
-  [cyan]/max-tokens <n>[/cyan]         Set LLM max output tokens (default: 256)
-  [cyan]/ctx-size <n>[/cyan]           Set LLM context window size (default: 2048)
+  [cyan]/max-tokens <n>[/cyan]         Set LLM max output tokens (default: 1024)
+  [cyan]/ctx-size <n>[/cyan]           Set LLM context window size (default: 4096)
   [cyan]/n-gpu-layers <n>[/cyan]       Set GPU layers for llama.cpp backend (0 = CPU only)
   [cyan]/n-threads <n>[/cyan]          Set CPU threads for llama.cpp backend (0 = auto)
   [cyan]/prompt <text>[/cyan]          Set LLM system prompt
@@ -191,6 +196,7 @@ def start_repl(
     top_k = cfg.retriever.top_k
     focused_file: str | None = None
     session_log: list[dict] = []  # tracks Q&A pairs for /export
+    conversation_history: list[dict] = []  # tracks messages for follow-up questions
     use_llm = True
 
     # Eagerly load the retriever (including embedding model) at startup
@@ -583,9 +589,17 @@ def start_repl(
             top_k=top_k,
             focused_file=focused_file,
             use_llm=use_llm,
+            conversation_history=conversation_history if use_llm else None,
         )
         if entry is not None:
             session_log.append(entry)
+            # Update conversation history for follow-up questions
+            if use_llm and entry.get("answer"):
+                conversation_history.append({"role": "user", "content": command})
+                conversation_history.append({"role": "assistant", "content": entry["answer"]})
+                # Keep conversation history bounded to avoid exceeding context limits
+                if len(conversation_history) > _MAX_HISTORY_TURNS * 2:
+                    conversation_history[:] = conversation_history[-_MAX_HISTORY_TURNS * 2:]
 
 
 def _ensure_retriever(retriever, cfg: PaperRAGConfig, store=None):
@@ -609,6 +623,7 @@ def _handle_query(
     top_k: int,
     focused_file: str | None = None,
     use_llm: bool = True,
+    conversation_history: list[dict] | None = None,
 ) -> "dict | None":
     """Run retrieval and LLM for a user question.
 
@@ -621,11 +636,27 @@ def _handle_query(
     t_retrieval = time.perf_counter() - t0
 
     if not results:
-        msg = "[yellow]No results found.[/yellow]"
-        if cfg.retriever.score_threshold > 0.1:
-            msg += f" [dim](threshold={cfg.retriever.score_threshold} — try /threshold 0.1 to widen the search)[/dim]"
-        console.print(msg)
-        return None
+        # When focused on a single paper, fall back to full-document context
+        # instead of giving up — this mimics llama-server's behavior of having
+        # the whole paper in context.
+        if use_llm and focused_file:
+            all_chunks = retriever.get_all_chunks_for_file(focused_file)
+            if all_chunks:
+                console.print("[dim](No retrieval match — using full paper context)[/dim]")
+                results = all_chunks
+                t_retrieval = time.perf_counter() - t0
+
+        if not results:
+            # Only use conversation history for follow-ups if the last assistant
+            # turn is recent (i.e., the user is likely asking a follow-up about
+            # the same topic, not a brand new unrelated question).
+            if use_llm and conversation_history and len(conversation_history) >= 2:
+                return _handle_followup(question, cfg, conversation_history, t0)
+            msg = "[yellow]No results found.[/yellow]"
+            if cfg.retriever.score_threshold > 0.1:
+                msg += f" [dim](threshold={cfg.retriever.score_threshold} — try /threshold 0.1 to widen the search)[/dim]"
+            console.print(msg)
+            return None
 
     if not use_llm:
         console.print(f"\n[bold]Retrieved Chunks[/bold] [dim]({t_retrieval:.2f}s)[/dim]")
@@ -680,7 +711,7 @@ def _handle_query(
         source_files = [r.file_path for r in results]
         header_printed = False
         t1 = time.perf_counter()
-        for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files):
+        for chunk in stream_answer(question, context_chunks, cfg.llm, source_files=source_files, conversation_history=conversation_history):
             if not header_printed:
                 console.print("\n[bold green]Answer:[/bold green]")
                 header_printed = True
@@ -712,6 +743,54 @@ def _handle_query(
         "question": question,
         "answer": full_answer,
         "sources": [Path(fp).name for fp in seen_files],
+    }
+
+
+def _handle_followup(
+    question: str,
+    cfg: PaperRAGConfig,
+    conversation_history: list[dict],
+    t0: float,
+) -> "dict | None":
+    """Handle a follow-up question using conversation history when retrieval returns no results."""
+    import sys
+    import time
+
+    from paperrag.llm import stream_followup
+
+    console.print("[dim](No new sources found — answering from conversation history)[/dim]")
+
+    full_answer = ""
+    try:
+        header_printed = False
+        t1 = time.perf_counter()
+        for chunk in stream_followup(question, conversation_history, cfg.llm):
+            if not header_printed:
+                console.print("\n[bold green]Answer:[/bold green]")
+                header_printed = True
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+            full_answer += chunk
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
+        t_llm = time.perf_counter() - t1
+        t_total = time.perf_counter() - t0
+        console.print(f"[dim]LLM: {t_llm:.2f}s | Total: {t_total:.2f}s[/dim]\n")
+    except ImportError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        return None
+    except Exception as exc:
+        from paperrag.llm import describe_llm_error
+        error_msg, hint = describe_llm_error(exc, cfg.llm.model_name)
+        console.print(f"[red]{error_msg}[/red]")
+        if hint:
+            console.print(f"[yellow]Fix: {hint}[/yellow]")
+        return None
+
+    return {
+        "question": question,
+        "answer": full_answer,
+        "sources": [],
     }
 
 

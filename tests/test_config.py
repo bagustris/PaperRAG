@@ -11,9 +11,9 @@ def test_default_config():
     assert cfg.chunker.chunk_size == 1000
     assert cfg.chunker.chunk_overlap == 200
     assert cfg.embedder.model_name == "sentence-transformers/all-MiniLM-L6-v2"
-    assert cfg.retriever.top_k == 2
+    assert cfg.retriever.top_k == 5
     assert cfg.llm.temperature == 0.0
-    assert cfg.llm.ctx_size == 2048
+    assert cfg.llm.ctx_size == 4096
     assert "research assistant" in cfg.llm.system_prompt
 
 

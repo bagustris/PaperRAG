@@ -60,12 +60,12 @@ PROMPT_PRESETS: dict[str, str] = {
     ),
 }
 
-# Presets that need more output tokens than the 256 default.
+# Presets that need more output tokens than the 1024 default.
 PRESET_MAX_TOKENS: dict[str, int] = {
-    "default": 256,
-    "reviewer": 512,
-    "summarizer": 512,
-    "explainer": 512,
+    "default": 1024,
+    "reviewer": 2048,
+    "summarizer": 2048,
+    "explainer": 1024,
 }
 
 
@@ -141,7 +141,7 @@ class EmbedderConfig(BaseModel):
 class RetrieverConfig(BaseModel):
     """Retrieval configuration."""
 
-    top_k: int = Field(default=2, ge=1)
+    top_k: int = Field(default=5, ge=1)
     score_threshold: float = Field(
         default=0.1,
         ge=0.0,
@@ -246,9 +246,9 @@ class LLMConfig(BaseModel):
         "Be concise and cite sources."
     )
     temperature: float = 0.0
-    max_tokens: int = 256
+    max_tokens: int = 1024
     ctx_size: int = Field(
-        default=2048,
+        default=4096,
         ge=512,
         validation_alias=AliasChoices("ctx_size", "n_ctx"),
         description=(

@@ -228,3 +228,25 @@ class Retriever:
         """Return list of file_path strings (useful for evaluation)."""
         results = self.retrieve(query, top_k)
         return [r.file_path for r in results]
+
+    def get_all_chunks_for_file(self, file_path: str) -> list[RetrievalResult]:
+        """Return all chunks for a given file, ordered by chunk_id.
+
+        Used for full-document context mode where the entire paper is sent
+        to the LLM instead of just top-k retrieval hits.
+        """
+        results = []
+        for meta in self.store.chunks:
+            if meta["file_path"] == file_path:
+                results.append(
+                    RetrievalResult(
+                        text=meta["text"],
+                        score=1.0,  # Full-document mode, no relevance scoring
+                        paper_title=meta["paper_title"],
+                        section_name=meta["section_name"],
+                        file_path=meta["file_path"],
+                        chunk_id=meta["chunk_id"],
+                    )
+                )
+        results.sort(key=lambda r: r.chunk_id)
+        return results
