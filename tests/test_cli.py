@@ -589,3 +589,82 @@ def test_repl_no_llm_invalid_argument_shows_usage(tmp_path):
         for call in mock_print.call_args_list
         if call.args
     )
+
+
+# ---------------------------------------------------------------------------
+# Full-document fallback and follow-up gating tests
+# ---------------------------------------------------------------------------
+
+
+def test_handle_query_full_document_fallback_when_focused():
+    """When focused on a file and retrieval returns nothing, fall back to full-document context."""
+    from unittest.mock import MagicMock, patch
+    from paperrag.repl import _handle_query
+    from paperrag.config import PaperRAGConfig
+
+    cfg = PaperRAGConfig()
+
+    # Mock retriever that returns no results for retrieve() but has chunks for the file
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve.return_value = []
+
+    # Simulate get_all_chunks_for_file returning chunks
+    from paperrag.retriever import RetrievalResult
+    fake_chunks = [
+        RetrievalResult(
+            text="This paper discusses speech chain VC.",
+            score=1.0,
+            paper_title="Speech Chain",
+            section_name="Introduction",
+            file_path="/papers/paper.pdf",
+            chunk_id=0,
+        ),
+    ]
+    mock_retriever.get_all_chunks_for_file.return_value = fake_chunks
+
+    with (
+        patch("paperrag.repl.console"),
+        patch("paperrag.llm.stream_answer", return_value=iter(["Full doc answer"])),
+    ):
+        entry = _handle_query(
+            "What is the remaining problem?",
+            mock_retriever,
+            cfg,
+            top_k=5,
+            focused_file="/papers/paper.pdf",
+            use_llm=True,
+            conversation_history=[],
+        )
+
+    # Should have called get_all_chunks_for_file as fallback
+    mock_retriever.get_all_chunks_for_file.assert_called_once_with("/papers/paper.pdf")
+    # Should return an answer (not None)
+    assert entry is not None
+    assert "Full doc answer" in entry["answer"]
+
+
+def test_handle_query_followup_requires_history():
+    """Follow-up should only trigger when conversation_history has at least 2 entries."""
+    from unittest.mock import MagicMock, patch
+    from paperrag.repl import _handle_query
+    from paperrag.config import PaperRAGConfig
+
+    cfg = PaperRAGConfig()
+
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve.return_value = []
+    mock_retriever.get_all_chunks_for_file.return_value = []  # No focused file chunks
+
+    with patch("paperrag.repl.console") as mock_console:
+        entry = _handle_query(
+            "random question",
+            mock_retriever,
+            cfg,
+            top_k=5,
+            focused_file=None,
+            use_llm=True,
+            conversation_history=[],  # Empty history - should NOT trigger followup
+        )
+
+    # Should return None (no results, no followup)
+    assert entry is None

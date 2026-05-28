@@ -69,17 +69,26 @@ def _cleanup_llama_servers() -> None:
 atexit.register(_cleanup_llama_servers)
 
 # Maximum characters per context chunk sent to the LLM.
-# Longer chunks are truncated to keep prompt size manageable for small models.
-_MAX_CHUNK_CHARS = 750
+# With ctx_size >= 4096, we allow larger chunks to preserve more context.
+# For smaller contexts, chunks are still truncated to keep prompt manageable.
+_MAX_CHUNK_CHARS = 2000
 _TRAILING_SOURCE_LINE_RE = re.compile(r"^\s*Sources?:\s*\[[0-9,\s-]+\]\s*$", re.IGNORECASE)
 
-# System prompt used for follow-up questions answered from conversation history only.
-_FOLLOWUP_SYSTEM_PROMPT = (
-    "You are a helpful research assistant. "
-    "Answer the follow-up question based on the conversation so far. "
-    "If the previous conversation does not contain relevant information, say so. "
-    "Be concise."
+# Suffix appended to the user's configured system prompt for follow-up questions
+# answered from conversation history only.
+_FOLLOWUP_PROMPT_SUFFIX = (
+    " Answer the follow-up question based on the conversation so far. "
+    "If the previous conversation does not contain relevant information, say so."
 )
+
+
+def _get_followup_system_prompt(config: "LLMConfig") -> str:
+    """Derive the follow-up system prompt from the user's configured system_prompt.
+
+    This ensures that tone, language, and constraints set by the user via
+    /prompt or /preset are respected even when answering from history only.
+    """
+    return config.system_prompt + _FOLLOWUP_PROMPT_SUFFIX
 
 
 def _build_prompt(question: str, context_chunks: list[str], source_labels: list[int] | None = None) -> str:
@@ -97,10 +106,18 @@ def _build_prompt(question: str, context_chunks: list[str], source_labels: list[
         "Use inline citation [1] within your answer." if n == 1
         else f"Use inline citations [1]–[{n}] within your answer. Only cite sources from [1] to [{n}]."
     )
+
+    # Use a more detailed instruction when we have substantial context
+    total_context_chars = sum(len(c) for c in context_chunks)
+    if total_context_chars > 3000:
+        answer_style = "Answer thoroughly using ONLY the context. Provide detailed reasoning and cite specific statements."
+    else:
+        answer_style = "Answer using ONLY the context."
+
     return (
         f"Context:\n{context_block}\n\n"
         f"Question: {question}\n\n"
-        f"Answer concisely using ONLY the context. {cite_instruction} Do not add a separate 'Source:' or 'Sources:' list at the end."
+        f"{answer_style} {cite_instruction} Do not add a separate 'Source:' or 'Sources:' list at the end."
     )
 
 
@@ -707,7 +724,7 @@ def stream_followup(
         if not config.think:
             user_prompt += " /no_think"
 
-    messages: list[dict] = [{"role": "system", "content": _FOLLOWUP_SYSTEM_PROMPT}]
+    messages: list[dict] = [{"role": "system", "content": _get_followup_system_prompt(config)}]
     messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_prompt})
 

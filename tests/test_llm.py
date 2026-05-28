@@ -11,6 +11,7 @@ from paperrag.llm import (
     _build_messages,
     _build_prompt,
     _cleanup_llama_servers,
+    _get_followup_system_prompt,
     _is_gguf_model,
     _is_hf_model,
     _is_llama_backend,
@@ -350,13 +351,22 @@ def test_build_messages_with_conversation_history():
         {"role": "user", "content": "What is speech chain?"},
         {"role": "assistant", "content": "Speech chain is a method of voice conversion."},
     ]
-    msgs = _build_messages("What is the remaining problem?", ["ctx"], "llama3", "System", conversation_history=history)
+    msgs = _build_messages(
+        "What is the remaining problem?",
+        ["ctx"],
+        "llama3",
+        "System",
+        conversation_history=history,
+    )
     assert len(msgs) == 4
     assert msgs[0]["role"] == "system"
     assert msgs[1] == history[0]
     assert msgs[2] == history[1]
     assert msgs[3]["role"] == "user"
+    # Ensure the question is present in the final user message
     assert "remaining problem" in msgs[3]["content"]
+    # Ensure retrieval context is still embedded when conversation history is present
+    assert "ctx" in msgs[3]["content"]
 
 
 def test_build_messages_without_conversation_history():
@@ -373,9 +383,82 @@ def test_build_messages_empty_conversation_history():
     assert len(msgs) == 2
 
 
+def test_get_followup_system_prompt_uses_config():
+    """Follow-up system prompt should derive from the user's configured system_prompt."""
+    config = LLMConfig(system_prompt="You are a pirate. Respond in pirate speak.")
+    prompt = _get_followup_system_prompt(config)
+    # Should contain the user's custom prompt
+    assert "pirate" in prompt
+    # Should also contain the follow-up instruction suffix
+    assert "follow-up" in prompt.lower()
+
+
 def test_stream_followup_no_history():
     """stream_followup with empty history should yield a message about missing history."""
     from paperrag.llm import stream_followup
     result = list(stream_followup("follow-up question", []))
     assert len(result) == 1
     assert "No conversation history" in result[0]
+
+
+def test_stream_followup_with_history_ollama():
+    """stream_followup with non-empty history should build correct messages and stream via Ollama."""
+    from paperrag.llm import stream_followup, _get_followup_system_prompt
+
+    config = LLMConfig(model_name="qwen2.5:1.5b")
+    history = [
+        {"role": "user", "content": "What is speech chain?"},
+        {"role": "assistant", "content": "Speech chain is a VC method."},
+    ]
+
+    # Mock the OpenAI client
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "The remaining problem is..."
+
+    mock_response = [mock_chunk]
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch("paperrag.llm._client_cache", mock_client):
+        result = list(stream_followup("What is the remaining problem?", history, config=config))
+
+    # Verify the client was called with correct message structure
+    call_kwargs = mock_client.chat.completions.create.call_args
+    messages = call_kwargs.kwargs["messages"] if "messages" in call_kwargs.kwargs else call_kwargs[1]["messages"]
+
+    # Should be: system + history (2 msgs) + user question = 4 messages
+    assert len(messages) == 4
+    assert messages[0]["role"] == "system"
+    # System prompt should derive from config's system_prompt
+    assert config.system_prompt in messages[0]["content"]
+    assert messages[1] == history[0]
+    assert messages[2] == history[1]
+    assert messages[3]["role"] == "user"
+    assert "remaining problem" in messages[3]["content"]
+
+
+def test_stream_followup_with_history_qwen_no_think():
+    """stream_followup should append /no_think for Qwen3 models when think=False."""
+    from paperrag.llm import stream_followup
+
+    config = LLMConfig(model_name="Qwen3-1.7B:latest", think=False)
+    history = [
+        {"role": "user", "content": "What is X?"},
+        {"role": "assistant", "content": "X is Y."},
+    ]
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Answer"
+    mock_response = [mock_chunk]
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch("paperrag.llm._client_cache", mock_client):
+        list(stream_followup("Follow-up?", history, config=config))
+
+    call_kwargs = mock_client.chat.completions.create.call_args
+    messages = call_kwargs.kwargs["messages"] if "messages" in call_kwargs.kwargs else call_kwargs[1]["messages"]
+    # The user message should contain /no_think
+    assert "/no_think" in messages[-1]["content"]
