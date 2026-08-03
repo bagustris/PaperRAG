@@ -34,6 +34,7 @@ llama = [
 ]
 test = [
     "pytest>=8.0",
+    "pytest-cov>=7.0",
 ]
 docs = [
     "sphinx>=7.0",

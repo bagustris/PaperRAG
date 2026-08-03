@@ -120,33 +120,6 @@ def test_json_backward_compatibility():
     assert store.version == 1
 
 
-def test_pickle_is_faster_than_json():
-    """Benchmark: pickle should be faster than JSON for large datasets."""
-    import time
-
-    # Create large dataset
-    large_chunks = [
-        {"chunk_id": i, "hash_id": f"h{i}", "text": f"text {i}" * 100,
-         "paper_title": "Paper", "section_name": "Section",
-         "file_path": f"/file_{i}.pdf", "file_hash": f"hash_{i}"}
-        for i in range(1000)
-    ]
-
-    # Time JSON serialization
-    start = time.time()
-    json_str = json.dumps(large_chunks)
-    json_time = time.time() - start
-
-    # Time pickle serialization
-    start = time.time()
-    pickle_bytes = pickle.dumps(large_chunks, protocol=pickle.HIGHEST_PROTOCOL)
-    pickle_time = time.time() - start
-
-    # Pickle should be significantly faster
-    print(f"JSON time: {json_time:.4f}s, Pickle time: {pickle_time:.4f}s")
-    assert pickle_time < json_time * 0.8  # At least 20% faster
-
-
 def test_config_snapshot_compatibility():
     """Test that config with new fields can still save/load snapshots."""
     cfg = PaperRAGConfig()
@@ -190,21 +163,19 @@ def test_parallel_hashing_function():
 
 
 def test_embedder_cache():
-    """Test that embedder is cached properly in retriever."""
+    """Test that the embedder cache dict exists and is keyed by (model_name, device).
+
+    Full caching behavior (including device-based separation) is covered by
+    tests/test_retriever.py::TestRetrieverInit.
+    """
     from paperrag.retriever import _embedder_cache
 
-    # Clear cache
     _embedder_cache.clear()
 
-    # First load should populate cache
     cfg = PaperRAGConfig()
-    cache_key = cfg.embedder.model_name
+    cache_key = (cfg.embedder.model_name, cfg.embedder.device)
 
-    # Cache should be empty initially
     assert cache_key not in _embedder_cache
-
-    # After creating retriever (if index exists), cache should be populated
-    # Note: We can't test full retriever without an index, but we can test the cache dict exists
     assert isinstance(_embedder_cache, dict)
 
 

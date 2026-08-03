@@ -15,7 +15,7 @@ from paperrag.vectorstore import VectorStore
 logger = logging.getLogger(__name__)
 
 # Module-level embedder cache to avoid reloading models
-_embedder_cache: dict[str, Embedder] = {}
+_embedder_cache: dict[tuple[str, str | None], Embedder] = {}
 
 
 @dataclass
@@ -52,8 +52,8 @@ class Retriever:
                 )
             self.store = VectorStore.load(index_dir)
 
-        # Cache embedder by model name to avoid reloading
-        cache_key = config.embedder.model_name
+        # Cache embedder by (model name, device) to avoid reloading
+        cache_key = (config.embedder.model_name, config.embedder.device)
         if cache_key in _embedder_cache:
             logger.info("Using cached embedder for model: %s", cache_key)
             self.embedder = _embedder_cache[cache_key]

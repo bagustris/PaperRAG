@@ -37,6 +37,9 @@ def evaluate(benchmark_file, retriever_fn, k=5):
 
     with open(benchmark_file, "r") as f:
         for line in f:
+            line = line.strip()
+            if not line:
+                continue
             sample = json.loads(line)
             question = sample["question"]
             relevant = sample["relevant_documents"]

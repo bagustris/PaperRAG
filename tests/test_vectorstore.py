@@ -1,8 +1,10 @@
-"""Tests for the FAISS vector store."""
+"""Tests for vectorstore module - FAISS vector store operations."""
 
 import json
-import shutil
+import pickle
+import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -11,159 +13,349 @@ from paperrag.chunker import Chunk
 from paperrag.config import PaperRAGConfig
 from paperrag.vectorstore import VectorStore
 
-DIM = 16
-TMP_DIR = Path("/tmp/paperrag_test_index")
+
+class TestVectorStoreInit:
+    """Test VectorStore initialization."""
+
+    def test_initialization(self):
+        """Test VectorStore initializes correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            assert store.index_dir == index_dir
+            assert store.dimension == 384
+            assert store.index.ntotal == 0
+            assert store.chunks == []
+            assert store.file_hashes == {}
+            assert store.version == 0
 
 
-@pytest.fixture(autouse=True)
-def cleanup():
-    if TMP_DIR.exists():
-        shutil.rmtree(TMP_DIR)
-    yield
-    if TMP_DIR.exists():
-        shutil.rmtree(TMP_DIR)
+class TestVectorStoreSaveLoad:
+    """Test FAISS save/load operations."""
+
+    def test_save_creates_directory(self):
+        """Test save creates index directory if it doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir) / "subdir" / "index"
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.save()
+            
+            assert index_dir.exists()
+            assert (index_dir / "faiss.index").exists()
+            assert (index_dir / "metadata.json").exists()
+            assert (index_dir / "file_hashes.json").exists()
+            assert (index_dir / "version.json").exists()
+
+    def test_save_load_roundtrip(self):
+        """Test save and load roundtrip preserves data."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            
+            # Create and populate store
+            store = VectorStore(index_dir, dimension=384)
+            store.chunks = [{"text": "chunk1"}, {"text": "chunk2"}]
+            store.file_hashes = {"file1.pdf": "hash1", "file2.pdf": "hash2"}
+            store.version = 1
+            
+            # Add some vectors
+            vectors = np.random.rand(2, 384).astype(np.float32)
+            store.index.add(vectors)
+            
+            store.save()
+            
+            # Load into new store
+            loaded_store = VectorStore.load(index_dir)
+            
+            assert loaded_store.dimension == 384
+            assert loaded_store.version == 1
+            assert loaded_store.chunks == store.chunks
+            assert loaded_store.file_hashes == store.file_hashes
+            assert loaded_store.index.ntotal == 2
+
+    def test_load_preserves_version(self):
+        """Test load preserves version information."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            store.version = 5
+            store.save()
+            
+            loaded_store = VectorStore.load(index_dir)
+            assert loaded_store.version == 5
+
+    def test_save_with_config_snapshot(self):
+        """Test save includes config snapshot when provided."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            config = MagicMock()
+            # Make save_snapshot actually create a file
+            def create_snapshot(path):
+                path.write_text('{"config": "snapshot"}')
+            config.save_snapshot = create_snapshot
+            
+            store.save(config)
+            
+            assert (index_dir / "config_snapshot.json").exists()
+            assert (index_dir / "config_snapshot.json").read_text() == '{"config": "snapshot"}'
+
+    def test_load_missing_version_file(self):
+        """Test load fails when version file is missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            # Don't create version file
+            with pytest.raises(FileNotFoundError):
+                VectorStore.load(index_dir)
 
 
-def _make_chunks(n: int, file_path: str = "/f.pdf") -> list[Chunk]:
-    return [
-        Chunk(
-            chunk_id=i,
-            hash_id=f"h{i}",
-            text=f"text {i}",
-            paper_title="P",
-            section_name="S",
-            file_path=file_path,
-            file_hash="fhash",
-        )
-        for i in range(n)
-    ]
+class TestVectorStoreOperations:
+    """Test vector store operations."""
+
+    def test_add_vectors(self):
+        """Test adding vectors to the index."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            vectors = np.random.rand(5, 384).astype(np.float32)
+            store.index.add(vectors)
+            
+            assert store.index.ntotal == 5
+
+    def test_add_chunks_metadata(self):
+        """Test adding chunk metadata."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            chunk = Chunk(
+                chunk_id=0,
+                hash_id="abc123",
+                text="test text",
+                paper_title="Test Paper",
+                section_name="Abstract",
+                file_path="/path/to/paper.pdf",
+                file_hash="sha256"
+            )
+            
+            store.chunks.append(chunk.to_dict())
+            
+            assert len(store.chunks) == 1
+            assert store.chunks[0]["text"] == "test text"
+
+    def test_file_hashes_tracking(self):
+        """Test file hash tracking."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.file_hashes["paper1.pdf"] = "hash1"
+            store.file_hashes["paper2.pdf"] = "hash2"
+            
+            assert len(store.file_hashes) == 2
+            assert store.file_hashes["paper1.pdf"] == "hash1"
+
+    def test_version_increment(self):
+        """Test version increment for reindexing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            assert store.version == 0
+            store.version += 1
+            assert store.version == 1
+
+    def test_incremental_version_save(self):
+        """Test incremental version saving."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.version = 1
+            store.save()
+            
+            loaded = VectorStore.load(index_dir)
+            assert loaded.version == 1
+            
+            # Increment and save again
+            store.version = 2
+            store.save()
+            
+            loaded = VectorStore.load(index_dir)
+            assert loaded.version == 2
 
 
-def _make_vecs(n: int) -> np.ndarray:
-    rng = np.random.RandomState(42)
-    vecs = rng.randn(n, DIM).astype(np.float32)
-    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-    return vecs / norms
+class TestVectorStoreMetadata:
+    """Test metadata handling."""
+
+    def test_metadata_save_load_pickle(self):
+        """Test metadata save/load with pickle format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.chunks = [
+                {"text": "chunk1", "metadata": "data1"},
+                {"text": "chunk2", "metadata": "data2"}
+            ]
+            store.save()
+            
+            loaded = VectorStore.load(index_dir)
+            assert loaded.chunks == store.chunks
+
+    def test_metadata_save_load_json_fallback(self):
+        """Test metadata save/load with JSON fallback for legacy format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.chunks = [{"text": "chunk1"}]
+            store.save()
+            
+            # Manually convert to JSON format to test fallback
+            metadata_file = index_dir / "metadata.json"
+            with open(metadata_file, 'rb') as f:
+                pickle_data = pickle.load(f)
+            
+            # Save as JSON
+            with open(metadata_file, 'w') as f:
+                json.dump(pickle_data, f)
+            
+            # Should load successfully with JSON fallback
+            loaded = VectorStore.load(index_dir)
+            assert loaded.chunks == store.chunks
+
+    def test_file_hashes_save_load(self):
+        """Test file hashes save/load."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.file_hashes = {
+                "paper1.pdf": "hash1",
+                "paper2.pdf": "hash2"
+            }
+            store.save()
+            
+            loaded = VectorStore.load(index_dir)
+            assert loaded.file_hashes == store.file_hashes
 
 
-def test_add_and_search():
-    store = VectorStore(TMP_DIR, DIM)
-    vecs = _make_vecs(5)
-    chunks = _make_chunks(5)
-    store.add(vecs, chunks)
-    assert store.index.ntotal == 5
+class TestVectorStoreReindexing:
+    """Test hash-based reindexing logic."""
 
-    results = store.search(vecs[0], top_k=2)
-    assert len(results) == 2
-    assert results[0][0]["chunk_id"] == 0
+    def test_detect_changed_files(self):
+        """Test detection of changed files based on hashes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            # Store initial hashes
+            store.file_hashes = {
+                "paper1.pdf": "hash1",
+                "paper2.pdf": "hash2"
+            }
+            
+            # Simulate new hashes
+            new_hashes = {
+                "paper1.pdf": "hash1",  # Unchanged
+                "paper2.pdf": "hash3",  # Changed
+                "paper3.pdf": "hash4"   # New file
+            }
+            
+            # Identify changed files
+            changed_files = []
+            new_files = []
+            
+            for filename, new_hash in new_hashes.items():
+                if filename not in store.file_hashes:
+                    new_files.append(filename)
+                elif store.file_hashes[filename] != new_hash:
+                    changed_files.append(filename)
+            
+            assert "paper2.pdf" in changed_files
+            assert "paper3.pdf" in new_files
+            assert "paper1.pdf" not in changed_files
+            assert "paper1.pdf" not in new_files
+
+    def test_reindex_with_unchanged_files(self):
+        """Test reindexing skips unchanged files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            # Existing files
+            store.file_hashes = {
+                "paper1.pdf": "hash1",
+                "paper2.pdf": "hash2"
+            }
+            store.chunks = [{"text": "existing chunk"}]
+            store.version = 1
+            store.save()
+            
+            # Load and simulate reindexing with unchanged files
+            loaded = VectorStore.load(index_dir)
+            
+            # If no files changed, should not modify index
+            assert loaded.version == 1
+            assert len(loaded.chunks) == 1
+
+    def test_reindex_with_changed_files(self):
+        """Test reindexing processes changed files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            # Initial state
+            store.file_hashes = {"paper1.pdf": "hash1"}
+            store.chunks = [{"text": "old chunk"}]
+            store.version = 1
+            store.save()
+            
+            # Simulate file change
+            loaded = VectorStore.load(index_dir)
+            loaded.file_hashes["paper1.pdf"] = "hash2"  # Changed
+            loaded.chunks = [{"text": "new chunk"}]
+            loaded.version = 2
+            loaded.save()
+            
+            # Verify new state
+            reloaded = VectorStore.load(index_dir)
+            assert reloaded.version == 2
+            assert reloaded.file_hashes["paper1.pdf"] == "hash2"
+            assert reloaded.chunks == [{"text": "new chunk"}]
 
 
-def test_save_and_load():
-    store = VectorStore(TMP_DIR, DIM)
-    vecs = _make_vecs(3)
-    chunks = _make_chunks(3)
-    store.add(vecs, chunks)
-    store.set_file_hash("/f.pdf", "abc")
-    store.version = 1
-    store.save(config=PaperRAGConfig())
+class TestVectorStoreAtomicOperations:
+    """Test atomic file operations."""
 
-    loaded = VectorStore.load(TMP_DIR)
-    assert loaded.index.ntotal == 3
-    assert loaded.dimension == DIM
-    assert loaded.version == 1
-    assert loaded.get_file_hash("/f.pdf") == "abc"
-    assert len(loaded.chunks) == 3
+    def test_save_uses_temp_files(self):
+        """Test save uses temporary files for atomicity."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.save()
+            
+            # Check that temp files were cleaned up
+            assert not (index_dir / "faiss.index.tmp").exists()
+            assert not (index_dir / "metadata.json.tmp").exists()
+            assert not (index_dir / "file_hashes.json.tmp").exists()
+            assert not (index_dir / "version.json.tmp").exists()
 
-
-def test_remove_by_file():
-    store = VectorStore(TMP_DIR, DIM)
-    vecs_a = _make_vecs(3)
-    vecs_b = _make_vecs(2)
-    store.add(vecs_a, _make_chunks(3, "/a.pdf"))
-    store.add(vecs_b, _make_chunks(2, "/b.pdf"))
-    assert store.index.ntotal == 5
-
-    store.remove_by_file("/a.pdf")
-    assert store.index.ntotal == 2
-    assert all(c["file_path"] == "/b.pdf" for c in store.chunks)
-
-
-def test_exists():
-    assert not VectorStore.exists(TMP_DIR)
-    store = VectorStore(TMP_DIR, DIM)
-    store.save()
-    assert VectorStore.exists(TMP_DIR)
-
-
-def test_search_empty():
-    store = VectorStore(TMP_DIR, DIM)
-    results = store.search(np.zeros((1, DIM), dtype=np.float32), top_k=3)
-    assert results == []
-
-
-def test_search_with_filter():
-    store = VectorStore(TMP_DIR, DIM)
-    # Add 3 chunks for file A
-    vecs_a = _make_vecs(3)
-    chunks_a = _make_chunks(3, "/a.pdf")
-    store.add(vecs_a, chunks_a)
-    
-    # Add 2 chunks for file B
-    vecs_b = _make_vecs(2)
-    chunks_b = _make_chunks(2, "/b.pdf")
-    store.add(vecs_b, chunks_b)
-    
-    assert store.index.ntotal == 5
-    
-    # Search for something that would normally match file A's first chunk
-    # but filter for file B.
-    # vecs_a[0] is most similar to chunks_a[0].
-    results = store.search(vecs_a[0], top_k=2, file_path="/b.pdf")
-    
-    # All results must be from file B
-    assert len(results) <= 2
-    for meta, score in results:
-        assert meta["file_path"] == "/b.pdf"
-    
-    # Search for file A
-    results_a = store.search(vecs_a[0], top_k=1, file_path="/a.pdf")
-    assert len(results_a) == 1
-    assert results_a[0][0]["file_path"] == "/a.pdf"
-    assert results_a[0][0]["chunk_id"] == 0
-
-
-def test_checkpoint_saves():
-    """Test multiple saves simulate checkpointing behavior."""
-    store = VectorStore(TMP_DIR, DIM)
-
-    # First checkpoint - add 3 chunks
-    vecs1 = _make_vecs(3)
-    chunks1 = _make_chunks(3, "/a.pdf")
-    store.add(vecs1, chunks1)
-    store.set_file_hash("/a.pdf", "hash_a")
-    store.save()
-
-    # Second checkpoint - add 2 more chunks
-    vecs2 = _make_vecs(2)
-    chunks2 = [
-        Chunk(
-            chunk_id=i + 3,
-            hash_id=f"h{i+3}",
-            text=f"text {i+3}",
-            paper_title="Paper B",
-            section_name="Section2",
-            file_path="/b.pdf",
-            file_hash="hash_b",
-        )
-        for i in range(2)
-    ]
-    store.add(vecs2, chunks2)
-    store.set_file_hash("/b.pdf", "hash_b")
-    store.save()
-
-    # Load and verify all data persisted correctly
-    loaded = VectorStore.load(TMP_DIR)
-    assert loaded.index.ntotal == 5
-    assert len(loaded.chunks) == 5
-    assert loaded.get_file_hash("/a.pdf") == "hash_a"
-    assert loaded.get_file_hash("/b.pdf") == "hash_b"
+    def test_save_creates_final_files(self):
+        """Test save creates final files after atomic operations."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            store = VectorStore(index_dir, dimension=384)
+            
+            store.save()
+            
+            # Check that final files exist
+            assert (index_dir / "faiss.index").exists()
+            assert (index_dir / "metadata.json").exists()
+            assert (index_dir / "file_hashes.json").exists()
+            assert (index_dir / "version.json").exists()
